@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Cloud Contacts
+Exec=cloud-contacts --app
+Icon=x-office-address-book
+Terminal=false
+Categories=Office;
