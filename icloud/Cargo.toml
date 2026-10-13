@@ -1,0 +1,24 @@
+[package]
+name = "cloud-contacts-icloud"
+version = "0.2.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[dependencies]
+icloud-session = { git = "https://github.com/ferdousbhai/icloud-for-omarchy", rev = "bb699d4e713dcb3ea785b3d950908afaf2198f69", features = ["clap"] }
+clap = { version = "4", features = ["derive"] }
+rustix = { version = "1", features = ["fs"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+uuid = { version = "1", features = ["v4"] }
+url = "2"
+
+[dev-dependencies]
+tempfile = "3"
+tiny_http = "0.12"
+
+[profile.release]
+lto = "thin"
+strip = true

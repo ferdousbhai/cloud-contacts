@@ -1,27 +1,36 @@
 pkgname=cloud-contacts
-pkgver=0.1.0
+pkgver=0.2.0
 pkgrel=1
 pkgdesc='Unified iCloud and Google contacts with a native GTK app'
-arch=('any')
+arch=('x86_64' 'aarch64')
+makedepends=('rust' 'cargo' 'git')
 url='https://github.com/ferdousbhai/cloud-contacts'
 license=('MIT')
 depends=('python' 'python-gobject' 'gtk4' 'libadwaita')
-optdepends=('icloud-contacts: iCloud provider' 'xdg-terminal-exec: sign-in from the app')
+optdepends=('icloud-session: shared Apple sign-in' 'xdg-terminal-exec: sign-in from the app')
+replaces=('icloud-contacts')
+conflicts=('icloud-contacts')
 # Run makepkg from packaging/ in a checked-out release tree.
 source=()
 sha256sums=()
+build() {
+  "$startdir/../bin/build-icloud"
+}
 check() {
   cd "$startdir/.."
+  cargo test --locked --manifest-path icloud/Cargo.toml
   python -m unittest discover -s tests
 }
 package() {
   cd "$startdir/.."
   install -d "$pkgdir/usr/lib/cloud-contacts" "$pkgdir/usr/bin"
+  install -Dm755 "${CARGO_TARGET_DIR:-icloud/target}/release/cloud-contacts-icloud" "$pkgdir/usr/lib/cloud-contacts/libexec/cloud-contacts-icloud"
   cp -r cloud_contacts bin "$pkgdir/usr/lib/cloud-contacts/"
   find "$pkgdir/usr/lib/cloud-contacts" -name __pycache__ -type d -exec rm -r {} +
   printf '%s\n' '#!/bin/sh' 'exec python /usr/lib/cloud-contacts/bin/cloud-contacts "$@"' > "$pkgdir/usr/bin/cloud-contacts"
   chmod 755 "$pkgdir/usr/bin/cloud-contacts"
   install -Dm644 data/com.ferdousbhai.cloudcontacts.desktop "$pkgdir/usr/share/applications/com.ferdousbhai.cloudcontacts.desktop"
+  install -Dm644 NOTICE "$pkgdir/usr/share/licenses/cloud-contacts/NOTICE"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/cloud-contacts/LICENSE"
   install -Dm644 README.md "$pkgdir/usr/share/doc/cloud-contacts/README.md"
 }

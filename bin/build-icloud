@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+cargo_bin=${CARGO:-$(command -v cargo || true)}
+[[ -n $cargo_bin ]] || cargo_bin="$HOME/.cargo/bin/cargo"
+[[ -x $cargo_bin ]] || { echo 'Rust/Cargo is required to build the bundled iCloud provider.' >&2; exit 1; }
+export CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-"$root/icloud/target"}
+[[ $CARGO_TARGET_DIR == /* ]] || CARGO_TARGET_DIR="$root/$CARGO_TARGET_DIR"
+"$cargo_bin" build --release --locked --manifest-path "$root/icloud/Cargo.toml" >&2
+printf '%s\n' "$CARGO_TARGET_DIR/release/cloud-contacts-icloud"

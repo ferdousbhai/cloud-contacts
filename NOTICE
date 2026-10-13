@@ -1,0 +1,134 @@
+Upstream attribution notice retained for the extracted iCloud backend.
+Source: icloud-for-omarchy at bb699d4e713dcb3ea785b3d950908afaf2198f69.
+
+icloud-for-omarchy
+Copyright (c) 2026 Ferdous Bhai. MIT License, see LICENSE.
+
+This repository holds icloud-session (session/, sessiond/), icloud-notes
+(notes/, and its sync engine icloud-notes-sync in notes-sync/),
+icloud-photos (photos/), icloud-findmy (findmy/), icloud-reminders
+(reminders/) and icloud-contacts (contacts/). The third-party credits below
+apply to the parts named; everything else is the author's own work.
+
+============================================================================
+notes-sync/ (icloud-notes-sync, shipped in the icloud-notes package)
+============================================================================
+
+icloud-notes-sync was originally derived from icloud-md 0.6.2
+(https://github.com/coddingtonbear/icloud-md) by Adam Coddington, as a Rust
+port. Much of its behaviour, file formats, request shapes, message strings
+and algorithms come from icloud-md, and notes-sync/proto/*.proto and
+notes-sync/tests/fixtures/ are copied or derived from it. icloud-md's license:
+
+MIT License
+
+Copyright (c) 2026 Adam Coddington
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+----------------------------------------------------------------------------
+
+notes-sync/src/diff3.rs is a port of node-diff3 3.2.1
+(https://github.com/bhousel/node-diff3), MIT License:
+Copyright (c) 2006, 2008 Tony Garnock-Jones <tonyg@lshift.net>
+Copyright (c) 2006, 2008 LShift Ltd. <query@lshift.net>
+Copyright (c) 2019-2026 Bryan Housel <bhousel@gmail.com>
+
+The Markdown serializer ports parts of mdast-util-to-markdown 2.1.2,
+mdast-util-gfm 3.1.0 (https://github.com/syntax-tree), markdown-table 3,
+longest-streak 3 and micromark-util-classify-character 2
+(https://github.com/wooorm, https://github.com/micromark), MIT License,
+Copyright (c) Titus Wormer <tituswormer@gmail.com>.
+
+Both are distributed under the same MIT terms as reproduced above.
+
+----------------------------------------------------------------------------
+
+notes-sync/src/md/yaml.rs ports parts of yaml 2.9.0
+(https://github.com/eemeli/yaml), ISC License:
+
+Copyright Eemeli Aro <eemeli@gmail.com>
+
+Permission to use, copy, modify, and/or distribute this software for any purpose
+with or without fee is hereby granted, provided that the above copyright notice
+and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND
+FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS
+OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
+TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF
+THIS SOFTWARE.
+
+============================================================================
+photos/ (icloud-photos)
+============================================================================
+
+The photos upload flow (photos/src/upload.rs: createUploadUrl, the content
+upload, putAsset, uploadStatus) is ported from timlaing/pyicloud
+(https://github.com/timlaing/pyicloud) services/photos_cloudkit/upload.py,
+and photos/tests/fixtures/write/ (create_upload_url.json,
+single_file_upload.json, put_asset*.json, upload_status.json,
+delete_request_browser.json, delete_response.json) is
+copied or adapted from its tests/fixtures. The read-side request shapes
+and fixtures follow timlaing/pyicloud and picklepete/pyicloud
+(https://github.com/picklepete/pyicloud) services/photos.py. Find My
+(findmy/) and the sign-in (sessiond/) follow pyicloud's documented
+endpoints too. Reminders (reminders/) follows timlaing/pyicloud's
+services/reminders/: its CloudKit request shapes, record fields and the
+topotext document it writes (reminders/src/{cloudkit,model,topotext}.rs),
+and reminders/tests/fixtures/pyicloud/ is copied from its
+tests/fixtures/reminders/. Both pyicloud repositories are under the MIT
+License:
+
+The MIT License (MIT)
+
+Copyright (c) 2025 The PyiCloud Authors  (timlaing/pyicloud)
+Copyright (c) 2016 The PyiCloud Authors  (picklepete/pyicloud)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+Nothing is taken from icloudpd (icloud-photos-downloader): the upload
+endpoint its fork used is named in photos/src/upload.rs only as the one
+this app does not use.
+
+============================================================================
+findmy/ (icloud-findmy)
+============================================================================
+
+icloud-findmy shows OpenStreetMap map tiles through libshumate.
+Map data (c) OpenStreetMap contributors, available under the Open Database
+License (https://www.openstreetmap.org/copyright).

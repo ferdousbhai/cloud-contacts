@@ -1,16 +1,17 @@
 # Cloud Contacts
 
 Your iCloud and Google contacts in one address book: a native GTK4/libadwaita
-app and a JSON CLI for Ghost or any local agent. Uses the existing
-`icloud-contacts` CLI and Google Workspace `gws`; it owns neither an Apple
+app and a JSON CLI for Ghost or any local agent. Ships its product-owned iCloud backend and Google Workspace `gws`; it owns neither an Apple
 session nor a second Google API implementation.
 
 ## Install
 
-Python 3.10+ runs the CLI without Python packages. The app additionally needs
+Python 3.10+ runs the CLI without Python packages. Source installation also needs
+Rust/Cargo to build the bundled private iCloud provider. The app additionally needs
 PyGObject, GTK4, and libadwaita (Omarchy/Arch packages `python-gobject`, `gtk4`,
 `libadwaita`). Install those dependencies with `omarchy pkg add` if missing.
-Install the iCloud Contacts app and/or `gws` for the providers you use.
+Only `icloud-session` is needed for Apple sign-in; `gws` supplies Google access.
+The retired icloud-contacts package is not a dependency.
 
 ```sh
 git clone https://github.com/ferdousbhai/cloud-contacts.git
@@ -124,7 +125,7 @@ Edits target exactly one source, including for merged contacts. Names can be
 changed/cleared; emails and phones are added without replacing existing values.
 Google edits fetch current contact-source metadata/etags and update only named
 fields, preserving unrelated data. Conflicts are returned instead of retried.
-iCloud writes go through its existing CLI's concurrency/field-preservation rules.
+iCloud writes use the bundled backend's concurrency/field-preservation rules.
 Deletion affects that provider (iCloud contacts have no Recently Deleted).
 Unmerge is the way to split the local identity without deleting provider data.
 
@@ -159,3 +160,21 @@ its menu entry under `~/.local/share/applications/`, and its application directo
 `~/.config/cloud-contacts` are intentionally retained.
 
 MIT licensed.
+
+## Replacing the legacy app
+
+The legacy standalone app is retired. This product ships the extracted Rust
+backend privately under its application directory, with protocol/fixture tests;
+there is no subprocess dependency on the legacy CLI or its package. The shared
+`icloud-session` service remains responsible for Apple sign-in.
+
+Run `cloud-contacts migrate` to adopt an existing Apple cache without contacting
+Apple or copying/moving files. The first native-app launch also adopts it.
+Legacy cache paths are intentionally retained so account identity, sync tokens,
+and existing records remain valid. Unlinking the account records that migration
+is handled, so a later run does not silently relink it.
+
+Arch packaging declares the legacy package replaced/conflicting. A source
+installation is not a pacman transaction: after the new provider is built and
+installed, remove the legacy package with the package manager. No provider data
+or cache directories should be deleted during retirement.

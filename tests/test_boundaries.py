@@ -87,3 +87,23 @@ class BoundaryTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         result = subprocess.run([str(root / 'bin/cloud-contacts'), '--json', 'account', 'list'], text=True, capture_output=True)
         self.assertEqual(json.loads(result.stdout)['data'], {})
+
+    def test_legacy_migration_keeps_cache_and_does_not_relink_removed_account(self):
+        legacy = 'icloud-contacts' if self.context.product == 'cloud-contacts' else 'icloud-reminders'
+        cache = self.root / 'legacy-data' / legacy / 'cache.json'
+        cache.parent.mkdir(parents=True)
+        original = '{"account":"fixture-apple-id","version":1,"records":[]}'
+        cache.write_text(original)
+        with patch.dict(os.environ, {'XDG_DATA_HOME': str(cache.parent.parent)}):
+            self.assertTrue(self.context.migrate_legacy()['linked'])
+            self.assertEqual(cache.read_text(), original)
+            self.context.remove_account('icloud')
+            self.assertFalse(self.context.migrate_legacy()['linked'])
+            self.assertEqual(self.context.accounts(), {})
+
+    def test_icloud_uses_private_provider_not_a_legacy_cli_on_path(self):
+        with patch.object(self.context, 'process', return_value={}) as call:
+            self.context.icloud(['list'])
+        command, args = call.call_args.args
+        self.assertIn('/libexec/' + self.context.product + '-icloud', command)
+        self.assertEqual(args, ['--json', 'list'])

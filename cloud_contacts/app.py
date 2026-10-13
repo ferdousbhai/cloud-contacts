@@ -56,6 +56,11 @@ class Window(Adw.ApplicationWindow):
         self.listbox.connect('row-activated', lambda _, row: self.details(row.data))
         scroll.set_child(self.listbox)
         outer.append(scroll)
+        if hasattr(self.service, 'migrate_legacy'):
+            try:
+                self.service.migrate_legacy()
+            except Failure as error:
+                self.notice = str(error)
         self.refresh()
 
     def closed(self, *_):

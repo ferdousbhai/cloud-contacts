@@ -114,6 +114,8 @@ class Context:
         def remove(data):
             if name not in data['accounts']:
                 raise Failure('not_found', f'No account named {name}')
+            if data['accounts'][name]['provider'] == 'icloud':
+                data['legacy_migrated'] = True
             del data['accounts'][name]
             return {'removed': name, 'credentials_deleted': False}
         return change_json(self.path, {'accounts': {}}, remove)
@@ -144,7 +146,7 @@ class Context:
             raise Failure('bad_response', 'Provider returned invalid JSON') from error
 
     def icloud(self, args):
-        tool = 'icloud-contacts' if self.product == 'cloud-contacts' else 'icloud-reminders'
+        tool = str(Path(__file__).resolve().parent.parent / 'libexec' / (self.product + '-icloud'))
         return self.process(os.environ.get(self.env_prefix + '_ICLOUD_COMMAND', tool), ['--json', *args])
 
     def google_env(self, name):
@@ -181,6 +183,28 @@ class Context:
             seen.add(token)
             params['pageToken'] = token
         raise Failure('page_limit', 'Too many pages; no complete result is available')
+
+    def migrate_legacy(self):
+        """Link an existing Apple cache without moving files or contacting Apple."""
+        if read_json(self.path, {}).get('legacy_migrated'):
+            return {'linked': False, 'reason': 'migration already handled', 'cache_changed': False}
+        legacy = 'icloud-contacts' if self.product == 'cloud-contacts' else 'icloud-reminders'
+        base = Path(os.environ.get('XDG_DATA_HOME', str(Path.home() / '.local/share')))
+        if not base.is_absolute():
+            base = Path.home() / '.local/share'
+        cache = base / legacy / 'cache.json'
+        if not cache.exists():
+            return {'linked': False, 'reason': 'no legacy cache', 'cache_changed': False}
+        data = read_json(cache, {})
+        if not isinstance(data, dict) or not data.get('account'):
+            return {'linked': False, 'reason': 'no authenticated legacy cache', 'cache_changed': False}
+        if not any(account['provider'] == 'icloud' for account in self.accounts().values()):
+            name = 'icloud'
+            if name in self.accounts():
+                raise Failure('ambiguous', 'Account name icloud is already used by another provider')
+            self.add_account('icloud')
+        change_json(self.path, {'accounts': {}}, lambda state: state.update(legacy_migrated=True))
+        return {'linked': True, 'cache': str(cache), 'cache_changed': False}
 
     def login(self, name):
         account = self.account(name)

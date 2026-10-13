@@ -13,6 +13,10 @@ class InstallerTests(unittest.TestCase):
             prefix = Path(tmp) / 'prefix with spaces'
             env = os.environ.copy()
             env.update({'HOME': tmp, 'XDG_CONFIG_HOME': tmp})
+            provider = Path(tmp) / 'fake-provider'
+            provider.write_text('#!/bin/sh\nexit 0\n')
+            provider.chmod(0o755)
+            env['CLOUD_CONTACTS_PROVIDER_BINARY'] = str(provider)
             for _ in range(2):
                 result = subprocess.run([str(root / 'install.sh'), str(prefix)], env=env, capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stderr)

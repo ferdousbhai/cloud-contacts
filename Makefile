@@ -5,3 +5,8 @@ test:
 
 native-test:
 	python3 tests/native_smoke.py
+
+provider-test:
+	cargo fmt --manifest-path icloud/Cargo.toml -- --check
+	cargo clippy --locked --manifest-path icloud/Cargo.toml --all-targets -- -D warnings
+	cargo test --locked --manifest-path icloud/Cargo.toml

@@ -2,7 +2,10 @@
 set -euo pipefail
 source_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 prefix=${1:-"$HOME/.local"}
-python3 - "$source_dir" "$prefix" "cloud-contacts" <<'PYINSTALL'
+provider_binary=${CLOUD_CONTACTS_PROVIDER_BINARY:-}
+[[ -n $provider_binary ]] || provider_binary=$("$source_dir/bin/build-icloud")
+[[ -x $provider_binary ]] || { echo 'Provider binary is missing or not executable.' >&2; exit 1; }
+python3 - "$source_dir" "$prefix" "cloud-contacts" "$provider_binary" <<'PYINSTALL'
 from pathlib import Path
 import shutil,sys
 source,prefix,product=Path(sys.argv[1]),Path(sys.argv[2]).expanduser().resolve(),sys.argv[3]
@@ -11,7 +14,9 @@ app=prefix/'share'/product
 app.mkdir(parents=True,exist_ok=True)
 for name in ['bin',package]:
  shutil.copytree(source/name,app/name,dirs_exist_ok=True,ignore=shutil.ignore_patterns('__pycache__','*.pyc'))
-for name in ['README.md','LICENSE']:
+(app/'libexec').mkdir(exist_ok=True)
+shutil.copy2(sys.argv[4],app/'libexec'/(product+'-icloud'))
+for name in ['README.md','LICENSE','NOTICE']:
  shutil.copyfile(source/name,app/name)
 launcher=prefix/'bin'/product
 launcher.parent.mkdir(parents=True,exist_ok=True)

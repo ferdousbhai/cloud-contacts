@@ -15,8 +15,9 @@ def parser():
     p = Parser(prog='cloud-contacts', description='Unified iCloud and Google contacts with reversible identity merges')
     p.add_argument('--config', help='account config JSON (default XDG config directory)')
     p.add_argument('--app', action='store_true', help='open the native GTK app')
-    p.add_argument('--version', action='version', version='cloud-contacts 0.1.0')
+    p.add_argument('--version', action='version', version='cloud-contacts 0.2.0')
     sub = p.add_subparsers(dest='command')
+    sub.add_parser('migrate', help='adopt an existing legacy Apple cache without moving data')
     sub.add_parser('status', help='check configured accounts with provider reads')
     account = sub.add_parser('account').add_subparsers(dest='action', required=True)
     account.add_parser('list', help='list configuration; no credential access')
@@ -78,6 +79,8 @@ def dispatch(service, args):
         return service.write(args.id, first=args.first, last=args.last, emails=args.email, phones=args.phone, source=args.source)
     if args.command == 'delete':
         return service.delete(args.id, args.yes, args.source)
+    if args.command == 'migrate':
+        return service.migrate_legacy()
     if args.command == 'status':
         rows, warnings = service.list()
         return {'accounts': service.accounts(), 'visible_records': len(rows), 'healthy': not warnings}, warnings
