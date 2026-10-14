@@ -116,10 +116,7 @@ fn lists_sorted_by_last_name_and_searches() {
         names(&env.json(&["list"])),
         ["Acme Hardware", "Bob Berg", "Ann Lee", "Mock User"]
     );
-    assert_eq!(
-        names(&env.json(&["list", "acme"])),
-        ["Acme Hardware", "Ann Lee"]
-    );
+    assert_eq!(names(&env.json(&["list", "acme"])), ["Acme Hardware", "Ann Lee"]);
     // Digits match phone numbers whatever their punctuation.
     assert_eq!(names(&env.json(&["list", "010 0100"])), ["Ann Lee"]);
     let text = env.ok(&["list", "--cached"]);
@@ -141,23 +138,13 @@ fn shows_a_contact_by_name_phone_email_or_me() {
     assert_eq!(ann["addresses"][0]["city"], "Springfield");
     assert_eq!(ann["birthday"], "1990-05-01");
     assert_eq!(ann["has_photo"], true);
-    assert_eq!(
-        env.json(&["show", "5550100100", "--cached"])["id"],
-        "ANN-LEE"
-    );
-    assert_eq!(
-        env.json(&["show", "ANN@acme.example", "--cached"])["id"],
-        "ANN-LEE"
-    );
+    assert_eq!(env.json(&["show", "5550100100", "--cached"])["id"], "ANN-LEE");
+    assert_eq!(env.json(&["show", "ANN@acme.example", "--cached"])["id"], "ANN-LEE");
     let me = env.json(&["show", "me", "--cached"]);
-    assert_eq!(
-        (me["id"].as_str(), me["me"].as_bool()),
-        (Some("ME-CARD"), Some(true))
-    );
+    assert_eq!((me["id"].as_str(), me["me"].as_bool()), (Some("ME-CARD"), Some(true)));
     let text = env.ok(&["show", "bob", "--cached"]);
     assert!(
-        text.contains("phone:     +47 555 01 234  (iPhone)")
-            && text.contains("Met at the conference"),
+        text.contains("phone:     +47 555 01 234  (iPhone)") && text.contains("Met at the conference"),
         "{text}"
     );
 }
@@ -178,9 +165,8 @@ fn add_finds_its_card_by_id_in_a_changeset_of_others() {
     env.ok(&["sync"]);
     // Another device changes Bob after this computer's tokens were issued:
     // the add's answer then lists Bob first.
-    env.state.put(
-        json!({ "contactId": "BOB-BERG", "firstName": "Bob", "lastName": "Berg", "nickName": "B" }),
-    );
+    env.state
+        .put(json!({ "contactId": "BOB-BERG", "firstName": "Bob", "lastName": "Berg", "nickName": "B" }));
     let bob_before = env.state.card("BOB-BERG").unwrap();
     let added = env.json(&[
         "add",
@@ -198,10 +184,7 @@ fn add_finds_its_card_by_id_in_a_changeset_of_others() {
     ]);
     let c = &added["contact"];
     assert_eq!(c["name"], "Cleo Park");
-    assert_eq!(
-        c["phones"][0],
-        json!({ "label": "work", "value": "+44 20 7946 0000" })
-    );
+    assert_eq!(c["phones"][0], json!({ "label": "work", "value": "+44 20 7946 0000" }));
     assert_eq!(c["emails"][0]["label"], "home");
     assert_eq!(c["birthday"], "07-04");
     let id = c["id"].as_str().unwrap();
@@ -268,14 +251,7 @@ fn edit_changes_only_what_it_names() {
     assert_eq!(method, "PUT");
     assert_eq!(body["contacts"][0]["contactId"], "ANN-LEE");
 
-    let out = env.run(&[
-        "--json",
-        "edit",
-        "ann",
-        "--remove-phone",
-        "999 999",
-        "--cached",
-    ]);
+    let out = env.run(&["--json", "edit", "ann", "--remove-phone", "999 999", "--cached"]);
     assert_eq!(code(&out), 1, "{}", stderr(&out));
     assert!(stderr(&out).contains("has no phone number 999 999"));
     let out = env.run(&["--json", "edit", "ann", "--cached"]);
@@ -294,11 +270,7 @@ fn an_edit_over_a_change_from_another_device_keeps_both() {
     let out = env.json(&["edit", "ann", "--cached", "--last", "Lee-Smith"]);
     assert_eq!(out["contact"]["last"], "Lee-Smith");
     assert_eq!(out["contact"]["job_title"], "Director");
-    let puts: Vec<_> = env
-        .writes()
-        .into_iter()
-        .filter(|(m, _)| m == "PUT")
-        .collect();
+    let puts: Vec<_> = env.writes().into_iter().filter(|(m, _)| m == "PUT").collect();
     assert_eq!(puts.len(), 2);
 }
 
@@ -325,10 +297,7 @@ fn delete_asks_or_needs_yes() {
     assert_eq!((code(&out), error_code(&out)), (64, "usage".into()));
     assert!(env.state.card("BOB-BERG").is_some());
     let out = env.json(&["delete", "bob", "--yes"]);
-    assert_eq!(
-        out["contact"],
-        json!({ "id": "BOB-BERG", "name": "Bob Berg" })
-    );
+    assert_eq!(out["contact"], json!({ "id": "BOB-BERG", "name": "Bob Berg" }));
     assert!(env.state.card("BOB-BERG").is_none());
     assert_eq!(env.state.count(), 3);
     let out = env.run(&["--json", "show", "bob", "--cached"]);
@@ -345,13 +314,7 @@ fn exports_vcards() {
         "{text}"
     );
     let file = env.dir.path().join("ann.vcf");
-    let out = env.json(&[
-        "export",
-        "ann",
-        "--cached",
-        "--output",
-        file.to_str().unwrap(),
-    ]);
+    let out = env.json(&["export", "ann", "--cached", "--output", file.to_str().unwrap()]);
     assert_eq!(out["count"], 1);
     let written = std::fs::read_to_string(&file).unwrap();
     assert!(
@@ -365,10 +328,7 @@ fn signed_out_is_exit_2() {
     let env = start();
     *env.state.signed_out.lock().unwrap() = true;
     let out = env.run(&["--json", "list"]);
-    assert_eq!(
-        (code(&out), error_code(&out)),
-        (2, "sign_in_required".into())
-    );
+    assert_eq!((code(&out), error_code(&out)), (2, "sign_in_required".into()));
 }
 
 #[test]
@@ -376,8 +336,7 @@ fn sync_counts_changes() {
     let env = start();
     assert_eq!(env.json(&["sync"]), json!({ "contacts": 4, "changed": 4 }));
     assert_eq!(env.json(&["sync"]), json!({ "contacts": 4, "changed": 0 }));
-    env.state
-        .put(json!({ "contactId": "NEW", "firstName": "Dee" }));
+    env.state.put(json!({ "contactId": "NEW", "firstName": "Dee" }));
     assert_eq!(env.json(&["sync"]), json!({ "contacts": 5, "changed": 1 }));
 }
 
@@ -399,12 +358,8 @@ fn needed_libs(path: &str) -> Vec<String> {
             .map(|&h| vaddr - u64_at(h + 0x10) + u64_at(h + 0x08))
             .expect("address in a loaded segment")
     };
-    let dynamic = headers
-        .iter()
-        .find(|&&h| p_type(h) == 2)
-        .expect("dynamically linked");
-    let entries: Vec<(usize, usize)> = (u64_at(dynamic + 0x08)
-        ..u64_at(dynamic + 0x08) + u64_at(dynamic + 0x20))
+    let dynamic = headers.iter().find(|&&h| p_type(h) == 2).expect("dynamically linked");
+    let entries: Vec<(usize, usize)> = (u64_at(dynamic + 0x08)..u64_at(dynamic + 0x08) + u64_at(dynamic + 0x20))
         .step_by(16)
         .map(|e| (u64_at(e), u64_at(e + 8)))
         .take_while(|&(tag, _)| tag != 0)
@@ -426,20 +381,14 @@ fn needed_libs(path: &str) -> Vec<String> {
 fn the_command_line_binary_does_not_link_gtk() {
     let ui = |libs: Vec<String>| {
         libs.into_iter()
-            .filter(|l| {
-                ["libgtk-4.", "libadwaita-1."]
-                    .iter()
-                    .any(|p| l.starts_with(p))
-            })
+            .filter(|l| ["libgtk-4.", "libadwaita-1."].iter().any(|p| l.starts_with(p)))
             .count()
     };
     let cli = needed_libs(env!("CARGO_BIN_EXE_cloud-contacts-icloud"));
     assert!(cli.iter().any(|l| l.starts_with("libc.")), "{cli:?}");
     assert_eq!(ui(cli.clone()), 0, "{cli:?}");
     // Named but not built without the `ui` feature.
-    if let Some(app) =
-        option_env!("CARGO_BIN_EXE_cloud-contacts-icloud-app").filter(|p| Path::new(p).exists())
-    {
+    if let Some(app) = option_env!("CARGO_BIN_EXE_cloud-contacts-icloud-app").filter(|p| Path::new(p).exists()) {
         assert_eq!(ui(needed_libs(app)), 2);
     }
 }

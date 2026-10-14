@@ -68,9 +68,7 @@ impl From<icloud_session::Error> for Error {
         match e {
             icloud_session::Error::SignInRequired => Error::SignInRequired,
             icloud_session::Error::Http { status, body } => Error::Http { status, body },
-            icloud_session::Error::Offline(m) | icloud_session::Error::Network(m) => {
-                Error::Offline(m)
-            }
+            icloud_session::Error::Offline(m) | icloud_session::Error::Network(m) => Error::Offline(m),
             icloud_session::Error::KeyringUnavailable(m) => Error::KeyringUnavailable(m),
             icloud_session::Error::BadResponse(m) => Error::BadResponse(m),
             other => Error::Other(other.to_string()),
@@ -111,18 +109,13 @@ pub struct SessionTransport {
 }
 
 impl SessionTransport {
-    fn with<T>(
-        &self,
-        f: impl FnOnce(&icloud_session::Session) -> icloud_session::Result<T>,
-    ) -> Result<T> {
+    fn with<T>(&self, f: impl FnOnce(&icloud_session::Session) -> icloud_session::Result<T>) -> Result<T> {
         let mut guard = self.session.lock().unwrap_or_else(|p| p.into_inner());
         if guard.is_none() {
             *guard = Some(icloud_session::Session::connect()?);
         }
         let result = f(guard.as_ref().expect("just connected"));
-        if let Err(icloud_session::Error::SignInRequired | icloud_session::Error::Service(_)) =
-            &result
-        {
+        if let Err(icloud_session::Error::SignInRequired | icloud_session::Error::Service(_)) = &result {
             *guard = None;
         }
         Ok(result?)
@@ -142,11 +135,9 @@ fn parse(url: &str, body: &[u8]) -> Result<Value> {
 impl Transport for SessionTransport {
     fn service_url(&self, key: &str) -> Result<String> {
         let ws = self.with(|s| s.webservices())?;
-        ws.url(key).map(str::to_owned).ok_or_else(|| {
-            Error::Other(format!(
-                "iCloud did not offer the {key} service for this account"
-            ))
-        })
+        ws.url(key)
+            .map(str::to_owned)
+            .ok_or_else(|| Error::Other(format!("iCloud did not offer the {key} service for this account")))
     }
 
     fn get_json(&self, url: &str) -> Result<Value> {
@@ -219,9 +210,7 @@ impl<'a> Client<'a> {
 
     /// Fresh tokens and the "me" card's id.
     pub fn startup(&self) -> Result<(Tokens, Option<String>)> {
-        let v = self
-            .t
-            .get_json(&format!("{}/co/startup?{QUERY}", self.base))?;
+        let v = self.t.get_json(&format!("{}/co/startup?{QUERY}", self.base))?;
         let token = |k: &str| {
             v[k].as_str()
                 .map(str::to_owned)
@@ -231,10 +220,7 @@ impl<'a> Client<'a> {
             pref: token("prefToken")?,
             sync: token("syncToken")?,
         };
-        let me = v["meCardId"]
-            .as_str()
-            .filter(|s| !s.is_empty())
-            .map(str::to_owned);
+        let me = v["meCardId"].as_str().filter(|s| !s.is_empty()).map(str::to_owned);
         Ok((tokens, me))
     }
 
@@ -261,23 +247,14 @@ impl<'a> Client<'a> {
 
     fn card_call(&self, tokens: &Tokens, method: Option<&str>, card: Value) -> Result<Value> {
         let method = method.map(|m| format!("&method={m}")).unwrap_or_default();
-        let url = format!(
-            "{}/co/contacts/card/?{QUERY}&{}{method}",
-            self.base,
-            tokens.query()
-        );
+        let url = format!("{}/co/contacts/card/?{QUERY}&{}{method}", self.base, tokens.query());
         self.t.post_json(&url, &json!({ "contacts": [card] }))
     }
 
     /// Creates `card` (`method` `None`; the card carries its new
     /// `contactId`) or replaces it (`Some("PUT")`: whole, so a field left
     /// out is removed, as of its `etag`).
-    pub fn write(
-        &self,
-        tokens: &Tokens,
-        method: Option<&str>,
-        card: &Map<String, Value>,
-    ) -> Result<Written> {
+    pub fn write(&self, tokens: &Tokens, method: Option<&str>, card: &Map<String, Value>) -> Result<Written> {
         let id = card
             .get("contactId")
             .and_then(Value::as_str)
@@ -287,11 +264,7 @@ impl<'a> Client<'a> {
     }
 
     pub fn delete(&self, tokens: &Tokens, id: &str, etag: &str) -> Result<Written> {
-        let answer = self.card_call(
-            tokens,
-            Some("DELETE"),
-            json!({ "contactId": id, "etag": etag }),
-        )?;
+        let answer = self.card_call(tokens, Some("DELETE"), json!({ "contactId": id, "etag": etag }))?;
         refused(&answer, id)?;
         let deleted = answer["deletes"]["contactIds"]
             .as_array()
@@ -313,17 +286,10 @@ fn refused(answer: &Value, id: &str) -> Result<()> {
     let Some(errors) = answer["errors"].as_array() else {
         return Ok(());
     };
-    match errors
-        .iter()
-        .find(|e| e["contactId"] == id)
-        .or(errors.first())
-    {
+    match errors.iter().find(|e| e["contactId"] == id).or(errors.first()) {
         Some(e) => Err(Error::Refused {
             code: e["errorCode"].as_i64().unwrap_or(0),
-            message: e["errorMessage"]
-                .as_str()
-                .unwrap_or("no reason given")
-                .to_owned(),
+            message: e["errorMessage"].as_str().unwrap_or("no reason given").to_owned(),
         }),
         None => Ok(()),
     }
@@ -355,10 +321,7 @@ mod tests {
             pref: "p+/=".into(),
             sync: "HwoQ/F8+q==".into(),
         };
-        assert_eq!(
-            t.query(),
-            "prefToken=p%2B%2F%3D&syncToken=HwoQ%2FF8%2Bq%3D%3D"
-        );
+        assert_eq!(t.query(), "prefToken=p%2B%2F%3D&syncToken=HwoQ%2FF8%2Bq%3D%3D");
     }
 
     #[test]
@@ -383,10 +346,7 @@ mod tests {
                 sync: "s2".into()
             }
         );
-        assert!(matches!(
-            saved(&answer, "GONE", &tokens),
-            Err(Error::BadResponse(_))
-        ));
+        assert!(matches!(saved(&answer, "GONE", &tokens), Err(Error::BadResponse(_))));
     }
 
     #[test]

@@ -56,9 +56,7 @@ pub struct State {
 
 fn query(url: &str) -> BTreeMap<String, String> {
     let q = url.split_once('?').map_or("", |(_, q)| q);
-    url::form_urlencoded::parse(q.as_bytes())
-        .into_owned()
-        .collect()
+    url::form_urlencoded::parse(q.as_bytes()).into_owned().collect()
 }
 
 impl State {
@@ -95,10 +93,7 @@ impl State {
     /// Stores (or replaces) a card as a change, with a new etag: what
     /// another device's edit looks like.
     pub fn put(&self, card: Value) {
-        self.book
-            .lock()
-            .unwrap()
-            .store(card.as_object().unwrap().clone());
+        self.book.lock().unwrap().store(card.as_object().unwrap().clone());
     }
 
     /// A card as the server holds it now.
@@ -187,11 +182,7 @@ impl State {
         let Some(card) = sent["contacts"][0].as_object().cloned() else {
             return (400, json!({ "errorReason": "no contacts" }));
         };
-        let id = card
-            .get("contactId")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_owned();
+        let id = card.get("contactId").and_then(Value::as_str).unwrap_or("").to_owned();
         let method = q.get("method").map(String::as_str);
         let refuse = |code: i64, why: &str| {
             (
@@ -199,11 +190,7 @@ impl State {
                 json!({ "errors": [{ "contactId": id, "etag": card.get("etag"), "errorCode": code, "errorMessage": why }] }),
             )
         };
-        let stale = |b: &Book| {
-            b.cards
-                .get(&id)
-                .is_none_or(|(_, c)| c.get("etag") != card.get("etag"))
-        };
+        let stale = |b: &Book| b.cards.get(&id).is_none_or(|(_, c)| c.get("etag") != card.get("etag"));
         match method {
             None => {
                 if b.cards.contains_key(&id) || id.is_empty() {
@@ -222,12 +209,8 @@ impl State {
         }
         // The changeset since the request's token: older changes (other
         // cards) first, the one just written last.
-        let mut changed: Vec<(u64, Map<String, Value>)> = b
-            .cards
-            .values()
-            .filter(|(s, _)| *s > since)
-            .cloned()
-            .collect();
+        let mut changed: Vec<(u64, Map<String, Value>)> =
+            b.cards.values().filter(|(s, _)| *s > since).cloned().collect();
         changed.sort_by_key(|(s, _)| *s);
         let mut m = State::header(&b);
         m.insert(
@@ -267,10 +250,7 @@ impl State {
 }
 
 fn invalid_token() -> (u16, Value) {
-    (
-        420,
-        json!({ "errorReason": "Invalid sync token", "errorCode": 420 }),
-    )
+    (420, json!({ "errorReason": "Invalid sync token", "errorCode": 420 }))
 }
 
 fn handle(mut request: tiny_http::Request, state: &State) -> std::io::Result<()> {
@@ -280,10 +260,7 @@ fn handle(mut request: tiny_http::Request, state: &State) -> std::io::Result<()>
     let method = request.method().to_string();
     let (status, reply) = state.route(&method, request.url(), &sent);
     if std::env::var_os("FAKE_CONTACTS_QUIET").is_none() {
-        eprintln!(
-            "{method} {} -> {status}",
-            request.url().split('?').next().unwrap_or("")
-        );
+        eprintln!("{method} {} -> {status}", request.url().split('?').next().unwrap_or(""));
     }
     let header = tiny_http::Header::from_bytes("Content-Type", "application/json").expect("header");
     let data = if reply.is_null() {
@@ -314,9 +291,7 @@ pub fn serve_with(listener: TcpListener, state: Arc<State>) -> std::io::Result<(
 
 #[allow(dead_code)] // tests/cli.rs includes this file.
 fn main() -> std::io::Result<()> {
-    let addr = std::env::args()
-        .nth(1)
-        .unwrap_or_else(|| "127.0.0.1:8765".into());
+    let addr = std::env::args().nth(1).unwrap_or_else(|| "127.0.0.1:8765".into());
     let listener = TcpListener::bind(&addr)?;
     let base = format!("http://{}", listener.local_addr()?);
     eprintln!("Fake iCloud Contacts on {base}");

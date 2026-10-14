@@ -66,26 +66,13 @@ pub fn card(c: &Contact) -> String {
         lines.push(format!("TEL;TYPE={}:{}", kind(&p.label), esc(&p.value)));
     }
     for e in c.values(Multi::Email) {
-        lines.push(format!(
-            "EMAIL;TYPE=INTERNET,{}:{}",
-            kind(&e.label),
-            esc(&e.value)
-        ));
+        lines.push(format!("EMAIL;TYPE=INTERNET,{}:{}", kind(&e.label), esc(&e.value)));
     }
     for u in c.values(Multi::Url) {
         lines.push(format!("URL;TYPE={}:{}", kind(&u.label), esc(&u.value)));
     }
     for a in c.addresses() {
-        let parts = [
-            "",
-            "",
-            &a.street,
-            &a.city,
-            &a.state,
-            &a.postal_code,
-            &a.country,
-        ]
-        .map(esc);
+        let parts = ["", "", &a.street, &a.city, &a.state, &a.postal_code, &a.country].map(esc);
         lines.push(format!("ADR;TYPE={}:{}", kind(&a.label), parts.join(";")));
     }
     let bday = c.field(Field::Birthday);
@@ -93,8 +80,7 @@ pub fn card(c: &Contact) -> String {
         // A birthday without a year is --MM-DD in vCard.
         lines.push(format!(
             "BDAY:{}",
-            bday.strip_prefix("1604")
-                .map_or(bday.to_owned(), |md| format!("-{md}"))
+            bday.strip_prefix("1604").map_or(bday.to_owned(), |md| format!("-{md}"))
         ));
     }
     lines.push(format!("UID:{}", esc(c.id())));

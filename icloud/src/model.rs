@@ -105,12 +105,8 @@ impl Multi {
     pub fn check(self, value: &str) -> Result<(), String> {
         match self {
             _ if value.trim().is_empty() => Err(format!("an empty {}", self.noun())),
-            Multi::Phone if digits(value).is_empty() => {
-                Err(format!("\"{value}\" is not a phone number"))
-            }
-            Multi::Email if !value.contains('@') => {
-                Err(format!("\"{value}\" is not an email address"))
-            }
+            Multi::Phone if digits(value).is_empty() => Err(format!("\"{value}\" is not a phone number")),
+            Multi::Email if !value.contains('@') => Err(format!("\"{value}\" is not an email address")),
             _ => Ok(()),
         }
     }
@@ -141,11 +137,7 @@ pub enum Change {
 /// tail of seven digits or more (`555-010-0199` is `+1 555 010 0199`).
 pub fn same_number(a: &str, b: &str) -> bool {
     let (a, b) = (digits(a), digits(b));
-    let (short, long) = if a.len() <= b.len() {
-        (&a, &b)
-    } else {
-        (&b, &a)
-    };
+    let (short, long) = if a.len() <= b.len() { (&a, &b) } else { (&b, &a) };
     !short.is_empty() && (short == long || (short.len() >= 7 && long.ends_with(short.as_str())))
 }
 
@@ -153,10 +145,7 @@ pub fn same_number(a: &str, b: &str) -> bool {
 /// a company, a phone number or an email address.
 pub fn names_someone(changes: &[Change]) -> bool {
     changes.iter().any(|c| match c {
-        Change::Set(
-            Field::First | Field::Middle | Field::Last | Field::Nickname | Field::Company,
-            v,
-        ) => !v.is_empty(),
+        Change::Set(Field::First | Field::Middle | Field::Last | Field::Nickname | Field::Company, v) => !v.is_empty(),
         Change::Add(m, _) => matches!(m, Multi::Phone | Multi::Email),
         _ => false,
     })
@@ -180,8 +169,7 @@ pub fn label_display(label: &str) -> String {
 /// anything else as typed.
 pub fn label_stored(label: &str) -> String {
     const STANDARD: &[&str] = &[
-        "MOBILE", "IPHONE", "HOME", "WORK", "MAIN", "OTHER", "PAGER", "HOME FAX", "WORK FAX",
-        "HOMEPAGE", "SCHOOL",
+        "MOBILE", "IPHONE", "HOME", "WORK", "MAIN", "OTHER", "PAGER", "HOME FAX", "WORK FAX", "HOMEPAGE", "SCHOOL",
     ];
     let upper = label.trim().to_uppercase();
     if STANDARD.contains(&upper.as_str()) {
@@ -270,10 +258,7 @@ impl Contact {
     }
 
     pub fn is_company(&self) -> bool {
-        self.0
-            .get("isCompany")
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
+        self.0.get("isCompany").and_then(Value::as_bool).unwrap_or(false)
     }
 
     pub fn has_photo(&self) -> bool {
@@ -330,15 +315,11 @@ impl Contact {
         } else {
             self.field(Field::Company)
         };
-        [
-            self.field(Field::JobTitle),
-            self.field(Field::Department),
-            company,
-        ]
-        .into_iter()
-        .filter(|s| !s.is_empty())
-        .collect::<Vec<_>>()
-        .join(sep)
+        [self.field(Field::JobTitle), self.field(Field::Department), company]
+            .into_iter()
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join(sep)
     }
 
     pub fn values(&self, m: Multi) -> Vec<Labeled> {
@@ -395,20 +376,13 @@ impl Contact {
         if texts.iter().any(|t| fold(t).contains(&q)) {
             return true;
         }
-        if self
-            .values(Multi::Email)
-            .iter()
-            .any(|e| fold(&e.value).contains(&q))
-        {
+        if self.values(Multi::Email).iter().any(|e| fold(&e.value).contains(&q)) {
             return true;
         }
         let d = digits(&q);
         d.len() >= 3
             && !q.chars().any(char::is_alphabetic)
-            && self
-                .values(Multi::Phone)
-                .iter()
-                .any(|p| digits(&p.value).contains(&d))
+            && self.values(Multi::Phone).iter().any(|p| digits(&p.value).contains(&d))
     }
 
     /// Applies `changes` to this card; an error names a value to remove
@@ -481,8 +455,7 @@ mod tests {
             "Ann Lee"
         );
         assert_eq!(
-            card(json!({"companyName": "Acme", "isCompany": true, "firstName": "Bo"}))
-                .display_name(),
+            card(json!({"companyName": "Acme", "isCompany": true, "firstName": "Bo"})).display_name(),
             "Acme"
         );
         assert_eq!(
@@ -518,18 +491,12 @@ mod tests {
                 value: "ann@acme.com".into()
             }]
         );
-        assert!(
-            c.apply(&[Change::Remove(Multi::Phone, "999".into())])
-                .is_err()
-        );
+        assert!(c.apply(&[Change::Remove(Multi::Phone, "999".into())]).is_err());
     }
 
     #[test]
     fn labels_and_birthdays() {
-        assert_eq!(
-            parse_labeled("https://x.org/?a=b", "HOMEPAGE").label,
-            "HOMEPAGE"
-        );
+        assert_eq!(parse_labeled("https://x.org/?a=b", "HOMEPAGE").label, "HOMEPAGE");
         assert_eq!(
             parse_labeled("WhatsApp=+62 812", "MOBILE"),
             Labeled {

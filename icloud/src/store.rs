@@ -126,10 +126,7 @@ impl Store {
 }
 
 fn damaged(path: &Path, e: impl std::fmt::Display) -> io::Error {
-    io::Error::other(format!(
-        "{} is damaged ({e}); delete it to start over",
-        path.display()
-    ))
+    io::Error::other(format!("{} is damaged ({e}); delete it to start over", path.display()))
 }
 
 fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {

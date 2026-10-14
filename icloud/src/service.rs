@@ -88,11 +88,7 @@ impl<'a> Service<'a> {
     /// Runs one write with the cached tokens; with fresh ones when iCloud
     /// refuses those (or none are cached). The tokens it ends with are
     /// saved, with the card, by [`Service::record`].
-    fn with_tokens(
-        &self,
-        client: &Client,
-        write: impl Fn(&Tokens) -> Result<Written>,
-    ) -> Result<Written> {
+    fn with_tokens(&self, client: &Client, write: impl Fn(&Tokens) -> Result<Written>) -> Result<Written> {
         if let Some(tokens) = self.cache()?.tokens {
             match write(&tokens) {
                 Err(e) if e.is_stale_token() => {}
@@ -133,9 +129,7 @@ impl<'a> Service<'a> {
         card.apply(changes).map_err(Error::Other)?;
         let client = Client::connect(self.t)?;
         let w = self.with_tokens(&client, |t| client.write(t, None, &card.0))?;
-        Ok(self
-            .record(card.id(), w)
-            .map(|c| c.expect("a create answers its card")))
+        Ok(self.record(card.id(), w).map(|c| c.expect("a create answers its card")))
     }
 
     /// Writes `changes` to the contact `c` (as cached). When it changed on
@@ -153,14 +147,10 @@ impl<'a> Service<'a> {
         };
         let w = match write(c, changes) {
             Err(e) if e.is_conflict() => {
-                let fresh = self.fresh(c)?.ok_or_else(|| {
-                    Error::Other(format!("\"{}\" has been deleted", c.display_name()))
-                })?;
-                let left: Vec<Change> = changes
-                    .iter()
-                    .filter(|ch| !fresh.has(ch))
-                    .cloned()
-                    .collect();
+                let fresh = self
+                    .fresh(c)?
+                    .ok_or_else(|| Error::Other(format!("\"{}\" has been deleted", c.display_name())))?;
+                let left: Vec<Change> = changes.iter().filter(|ch| !fresh.has(ch)).cloned().collect();
                 if left.is_empty() {
                     return Ok(Saved {
                         value: fresh,
@@ -171,9 +161,7 @@ impl<'a> Service<'a> {
             }
             other => other?,
         };
-        Ok(self
-            .record(c.id(), w)
-            .map(|c| c.expect("an update answers its card")))
+        Ok(self.record(c.id(), w).map(|c| c.expect("an update answers its card")))
     }
 
     /// Deletes the contact `c`. When it changed on another device since, it
@@ -209,10 +197,7 @@ fn changes(before: &Cache, after: &Cache) -> usize {
         c.contacts.iter().map(|c| (c.id(), c.etag())).collect()
     }
     let (was, now) = (etags(before), etags(after));
-    let changed_or_new = now
-        .iter()
-        .filter(|(id, etag)| was.get(*id) != Some(*etag))
-        .count();
+    let changed_or_new = now.iter().filter(|(id, etag)| was.get(*id) != Some(*etag)).count();
     let gone = was.keys().filter(|id| !now.contains_key(*id)).count();
     changed_or_new + gone
 }

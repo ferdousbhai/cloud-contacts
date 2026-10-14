@@ -318,10 +318,7 @@ impl Cli<'_> {
 
     fn print(&self, v: Value, text: impl FnOnce() -> String) {
         if self.json {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&v).expect("JSON values serialize")
-            );
+            println!("{}", serde_json::to_string_pretty(&v).expect("JSON values serialize"));
         } else {
             print!("{}", text());
         }
@@ -361,21 +358,12 @@ impl Cli<'_> {
                 "add needs a name (--first, --last, --company, ...), a --phone or an --email",
             ));
         }
-        if is_company
-            && !changes
-                .iter()
-                .any(|c| matches!(c, Change::Set(Field::Company, _)))
-        {
+        if is_company && !changes.iter().any(|c| matches!(c, Change::Set(Field::Company, _))) {
             return Err(usage("--is-company needs --company"));
         }
         let saved = self.svc.add(&changes, is_company)?;
         let c = saved.value;
-        self.done(
-            "add",
-            &c,
-            &format!("Added {}", c.display_name()),
-            saved.warning,
-        )
+        self.done("add", &c, &format!("Added {}", c.display_name()), saved.warning)
     }
 
     fn edit(&self, query: &str, changes: Vec<Change>) -> Outcome {
@@ -413,10 +401,7 @@ impl Cli<'_> {
         let chosen: Vec<&Contact> = if queries.is_empty() {
             cache.contacts.iter().collect()
         } else {
-            queries
-                .iter()
-                .map(|q| resolve(&cache, q))
-                .collect::<Result<_, _>>()?
+            queries.iter().map(|q| resolve(&cache, q)).collect::<Result<_, _>>()?
         };
         let text: String = chosen.iter().map(|c| vcard::card(c)).collect();
         let count = chosen.len();
@@ -425,9 +410,7 @@ impl Cli<'_> {
                 std::fs::write(&path, &text)
                     .map_err(|e| Failure::Other(format!("cannot write {}: {e}", path.display())))?;
                 let out = json!({ "action": "export", "count": count, "file": path });
-                self.print(out, || {
-                    format!("Wrote {count} contact(s) to {}\n", path.display())
-                });
+                self.print(out, || format!("Wrote {count} contact(s) to {}\n", path.display()));
             }
             None if self.json => self.print(
                 json!({ "action": "export", "count": count, "vcard": text }),
@@ -454,10 +437,7 @@ impl Cli<'_> {
         let (report, _) = self.svc.sync()?;
         let out = json!({ "contacts": report.contacts, "changed": report.changed });
         self.print(out, || {
-            format!(
-                "Synced: {} contacts ({} changed)\n",
-                report.contacts, report.changed
-            )
+            format!("Synced: {} contacts ({} changed)\n", report.contacts, report.changed)
         });
         Ok(())
     }
@@ -494,11 +474,7 @@ fn changes(f: Fields) -> Result<Vec<Change>, Failure> {
     if let Some(n) = f.notes {
         out.push(Change::Set(Field::Notes, n));
     }
-    for (m, values) in [
-        (Multi::Phone, f.phones),
-        (Multi::Email, f.emails),
-        (Multi::Url, f.urls),
-    ] {
+    for (m, values) in [(Multi::Phone, f.phones), (Multi::Email, f.emails), (Multi::Url, f.urls)] {
         for v in values {
             let l = model::parse_labeled(&v, m.default_label());
             m.check(&l.value).map_err(Failure::Usage)?;
@@ -542,29 +518,19 @@ fn resolve<'c>(cache: &'c Cache, query: &str) -> Result<&'c Contact, Failure> {
         return Ok(c);
     }
     if q.eq_ignore_ascii_case("me") {
-        return cache
-            .me
-            .as_deref()
-            .and_then(|id| cache.get(id))
-            .ok_or_else(|| {
-                Failure::Coded(
-                    "not_found",
-                    "iCloud has no \"me\" card for this account (set My Card on an Apple device)"
-                        .into(),
-                )
-            });
+        return cache.me.as_deref().and_then(|id| cache.get(id)).ok_or_else(|| {
+            Failure::Coded(
+                "not_found",
+                "iCloud has no \"me\" card for this account (set My Card on an Apple device)".into(),
+            )
+        });
     }
     let f = model::fold(q);
     let all = &cache.contacts;
     let pick = |keep: &dyn Fn(&Contact) -> bool| all.iter().filter(|c| keep(c)).collect::<Vec<_>>();
-    let mut matches =
-        pick(&|c| model::fold(&c.display_name()) == f || model::fold(&c.person_name()) == f);
+    let mut matches = pick(&|c| model::fold(&c.display_name()) == f || model::fold(&c.person_name()) == f);
     if matches.is_empty() && q.contains('@') {
-        matches = pick(&|c| {
-            c.values(Multi::Email)
-                .iter()
-                .any(|e| Multi::Email.matches(&e.value, q))
-        });
+        matches = pick(&|c| c.values(Multi::Email).iter().any(|e| Multi::Email.matches(&e.value, q)));
     }
     let d = model::digits(q);
     if matches.is_empty() && d.len() >= 3 && !q.chars().any(char::is_alphabetic) {
@@ -581,10 +547,7 @@ fn resolve<'c>(cache: &'c Cache, query: &str) -> Result<&'c Contact, Failure> {
     }
     match matches.as_slice() {
         [c] => Ok(c),
-        [] => Err(Failure::Coded(
-            "not_found",
-            format!("no contact matches \"{query}\""),
-        )),
+        [] => Err(Failure::Coded("not_found", format!("no contact matches \"{query}\""))),
         many => Err(Failure::Coded(
             "ambiguous",
             format!(
@@ -670,11 +633,7 @@ fn line(c: &Contact) -> String {
 }
 
 fn detail(c: &Contact, cache: &Cache) -> String {
-    let mut out = format!(
-        "{}{}\n",
-        c.display_name(),
-        if cache.is_me(c) { "  (me)" } else { "" }
-    );
+    let mut out = format!("{}{}\n", c.display_name(), if cache.is_me(c) { "  (me)" } else { "" });
     let row = |out: &mut String, label: &str, value: &str| {
         if !value.is_empty() {
             *out += &format!("  {:<11}{value}\n", format!("{label}:"));
@@ -683,11 +642,7 @@ fn detail(c: &Contact, cache: &Cache) -> String {
     let job = c.work(", ");
     row(&mut out, "nickname", c.field(Field::Nickname));
     row(&mut out, "work", &job);
-    for (m, noun) in [
-        (Multi::Phone, "phone"),
-        (Multi::Email, "email"),
-        (Multi::Url, "url"),
-    ] {
+    for (m, noun) in [(Multi::Phone, "phone"), (Multi::Email, "email"), (Multi::Url, "url")] {
         for l in c.values(m) {
             row(
                 &mut out,
@@ -697,28 +652,18 @@ fn detail(c: &Contact, cache: &Cache) -> String {
         }
     }
     for a in c.addresses() {
-        let place = [
-            a.street.replace('\n', ", "),
-            a.city,
-            a.state,
-            a.postal_code,
-            a.country,
-        ]
-        .into_iter()
-        .filter(|s| !s.is_empty())
-        .collect::<Vec<_>>()
-        .join(", ");
+        let place = [a.street.replace('\n', ", "), a.city, a.state, a.postal_code, a.country]
+            .into_iter()
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join(", ");
         row(
             &mut out,
             "address",
             &format!("{place}  ({})", model::label_display(&a.label)),
         );
     }
-    row(
-        &mut out,
-        "birthday",
-        &model::birthday_display(c.field(Field::Birthday)),
-    );
+    row(&mut out, "birthday", &model::birthday_display(c.field(Field::Birthday)));
     row(&mut out, "id", c.id());
     let notes = c.field(Field::Notes);
     if !notes.is_empty() {
@@ -764,13 +709,7 @@ mod tests {
         assert_eq!(id("ANN@x.org").as_deref(), Some("A"));
         assert_eq!(id("5550100").as_deref(), Some("B"));
         assert_eq!(id("bo").as_deref(), Some("C"));
-        assert!(matches!(
-            resolve(&c, "ann"),
-            Err(Failure::Coded("ambiguous", _))
-        ));
-        assert!(matches!(
-            resolve(&c, "zed"),
-            Err(Failure::Coded("not_found", _))
-        ));
+        assert!(matches!(resolve(&c, "ann"), Err(Failure::Coded("ambiguous", _))));
+        assert!(matches!(resolve(&c, "zed"), Err(Failure::Coded("not_found", _))));
     }
 }
