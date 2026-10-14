@@ -24,5 +24,8 @@ class InstallerTests(unittest.TestCase):
             result = subprocess.run([str(binary), 'account', 'list', '--json'], env=env, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(json.loads(result.stdout)['data'], {})
+            skill = subprocess.run([str(binary), 'skill', 'install'], env=env, capture_output=True, text=True)
+            self.assertEqual(skill.returncode, 0, skill.stdout + skill.stderr)
+            self.assertTrue((Path(tmp) / '.agents/skills/cloud-contacts/SKILL.md').is_file())
             desktop = prefix / 'share/applications/com.ferdousbhai.cloudcontacts.desktop'
             self.assertIn('Exec="' + str(binary) + '" --app', desktop.read_text())

@@ -12,7 +12,7 @@ source,prefix,product=Path(sys.argv[1]),Path(sys.argv[2]).expanduser().resolve()
 package=product.replace('-','_')
 app=prefix/'share'/product
 app.mkdir(parents=True,exist_ok=True)
-for name in ['bin',package]:
+for name in ['bin',package,'skills']:
  shutil.copytree(source/name,app/name,dirs_exist_ok=True,ignore=shutil.ignore_patterns('__pycache__','*.pyc'))
 (app/'libexec').mkdir(exist_ok=True)
 shutil.copy2(sys.argv[4],app/'libexec'/(product+'-icloud'))

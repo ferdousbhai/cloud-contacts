@@ -146,11 +146,16 @@ fake providers exclusively.
 ## Agent skill
 
 [skills/cloud-contacts/SKILL.md](skills/cloud-contacts/SKILL.md) teaches AI agents to install,
-link, and use cloud-contacts. Install it for your agents with:
+link, and use cloud-contacts. It ships with the CLI:
 
 ```sh
-npx skills add ferdousbhai/cloud-contacts -g
+cloud-contacts skill install   # ~/.agents/skills/cloud-contacts, linked into ~/.claude/skills
+cloud-contacts skill remove
 ```
+
+A new release refreshes the installed copy automatically; only a copy cloud-contacts
+wrote (marked `.managed-by-cloud-contacts`) is ever changed. Before cloud-contacts is
+installed: `npx skills add ferdousbhai/cloud-contacts -g`.
 
 ## Develop / remove
 
