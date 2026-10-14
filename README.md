@@ -143,6 +143,15 @@ client setup is delegated to `gws`, not bundled app credentials. Live-account
 behavior still needs an owner-authorized integration pass; automated tests use
 fake providers exclusively.
 
+## Agent skill
+
+[skills/cloud-contacts/SKILL.md](skills/cloud-contacts/SKILL.md) teaches AI agents to install,
+link, and use cloud-contacts. Install it for your agents with:
+
+```sh
+npx skills add ferdousbhai/cloud-contacts -g
+```
+
 ## Develop / remove
 
 ```sh
