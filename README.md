@@ -159,8 +159,8 @@ wrote (marked `.managed-by-cloud-contacts`) is ever changed.
 ## Develop / remove
 
 ```sh
-make test
-make native-test
+bin/check                              # every check; .githooks/pre-push runs it before a push
+git config core.hooksPath .githooks    # once per clone
 ```
 
 The native test uses a private Broadway display, private D-Bus, temporary HOME,

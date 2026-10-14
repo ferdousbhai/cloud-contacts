@@ -1,0 +1,28 @@
+#!/bin/bash
+# Every check a change must pass, run on this machine. .githooks/pre-push runs it before a push
+# (NO_CHECK=1 skips it); enable the hook once per clone with `git config core.hooksPath .githooks`.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+export PATH="$HOME/.cargo/bin:$PATH"
+
+step() { printf '\n==> %s\n' "$*"; }
+
+step "provider: rustfmt, clippy, tests"
+cargo fmt --manifest-path icloud/Cargo.toml -- --check
+cargo clippy --locked --manifest-path icloud/Cargo.toml --all-targets -- -D warnings
+cargo test --locked --manifest-path icloud/Cargo.toml
+
+step "python tests"
+python3 -m unittest discover -s tests -v
+python3 -m compileall -q cloud_contacts
+bash -n install.sh packaging/PKGBUILD .githooks/pre-push
+
+# The native smoke test needs GTK 4, libadwaita and PyGObject.
+if python3 -c 'import gi; gi.require_version("Gtk", "4.0"); gi.require_version("Adw", "1")' 2>/dev/null; then
+  step "native app smoke test"
+  python3 tests/native_smoke.py
+else
+  echo "note: skipping the native smoke test (install gtk4, libadwaita and python-gobject to run it)" >&2
+fi
+
+printf '\nAll checks passed.\n'
