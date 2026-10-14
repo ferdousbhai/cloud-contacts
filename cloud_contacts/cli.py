@@ -2,15 +2,12 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from . import __version__, agent_skill
+from . import __version__, agent_skill, cli_output
 from .common import Failure
 from .service import Contacts
 
 
-class Parser(argparse.ArgumentParser):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.add_argument('--json', action='store_true', default=argparse.SUPPRESS, help='JSON envelope (also the default)')
+Parser = cli_output.Parser
 
 
 def parser():
@@ -119,9 +116,19 @@ def skill(action):
         raise Failure('skill_unmanaged', str(error)) from None
 
 
+def summary(args, data):
+    """A one-line summary of a command's result, for the envelope and text output."""
+    words = [w for w in (args.command, getattr(args, 'action', None)) if w]
+    if isinstance(data, list):
+        noun = 'lists' if args.command == 'lists' else 'contacts'
+        return cli_output.summarize(data, 'candidates' if args.command == 'candidates' else noun)
+    return ' '.join(words) if words else 'cloud-contacts'
+
+
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     args = parser().parse_args(argv)
+    mode = cli_output.mode_of(args)
     home = agent_skill.home()
     if home is not None:
         agent_skill.refresh(home, SKILL)
@@ -129,7 +136,7 @@ def main(argv=None):
         if args.command == 'skill':
             result = skill(args.action)
             if result is not None:
-                print(json.dumps({'ok': True, 'data': result, 'meta': {'warnings': []}}, ensure_ascii=False))
+                cli_output.emit(result, mode, f'skill {args.action}')
             return 0
         service = Contacts(args.config)
         if args.app or args.command is None:
@@ -139,11 +146,8 @@ def main(argv=None):
         warnings = []
         if isinstance(result, tuple):
             result, warnings = result
-        print(json.dumps({'ok': True, 'data': result, 'meta': {'warnings': warnings}}, ensure_ascii=False))
-        return 0
+        return cli_output.emit(result, mode, summary(args, result), warnings)
     except Failure as error:
-        print(json.dumps({'ok': False, 'error': {'code': error.code, 'message': str(error), 'details': error.details}}, ensure_ascii=False))
-        raise SystemExit(1)
+        raise SystemExit(cli_output.fail(error.code, str(error), mode, details=error.details)) from None
     except (OSError, ValueError) as error:
-        print(json.dumps({'ok': False, 'error': {'code': 'local_error', 'message': str(error)}}))
-        raise SystemExit(1)
+        raise SystemExit(cli_output.fail('local_error', str(error), mode)) from None

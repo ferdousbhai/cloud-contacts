@@ -11,3 +11,7 @@ clone, `NO_CHECK=1` skips it).
 Tests use temporary HOME/config and fake CLIs; never read live accounts, launch
 the UI on the owner's desktop, or modify their contacts/tasks. Provider writes
 are explicit. Preserve unknown fields, account IDs, and partial-result warnings.
+
+CLI output, errors and exit codes follow the shared product contract in `cloud_contacts/cli_output.py`
+(text on a terminal, JSON envelope when piped; exit 0/1/2 usage/3 auth/4 not found/5 unavailable). Keep that
+file identical across product repositories.
