@@ -21,8 +21,10 @@ class Unmanaged(Exception):
 
 
 class Skill:
-    def __init__(self, name: str, cli: str, version: str, source: Path):
+    def __init__(self, name: str, cli: str, version: str, source: Path, adopts_legacy: bool = False):
         self.name, self.cli, self.version, self.source = name, cli, version, source
+        # Adopt an unmarked directory holding only SKILL.md (a pre-marker release's copy).
+        self.adopts_legacy = adopts_legacy
 
     @property
     def body(self) -> str:
@@ -46,6 +48,12 @@ class Skill:
         marker = path / self.marker
         return path.is_dir() and not path.is_symlink() and marker.is_file() and not marker.is_symlink()
 
+    def legacy(self, path: Path) -> bool:
+        if not self.adopts_legacy or path.is_symlink() or not path.is_dir():
+            return False
+        names = [entry.name for entry in path.iterdir()]
+        return names == [SKILL_FILE] and (path / SKILL_FILE).is_file() and not (path / SKILL_FILE).is_symlink()
+
     def unmanaged(self, path: Path) -> Unmanaged:
         return Unmanaged(f'{path} exists but was not written by {self.cli}; move it aside to let {self.cli} install its skill there')
 
@@ -66,7 +74,7 @@ def install(home: Path, skill: Skill) -> dict:
     target = skill.dir(home)
     if target.is_symlink() or (target.exists() and not target.is_dir()):
         raise skill.unmanaged(target)
-    if target.is_dir() and not skill.owns(target) and any(target.iterdir()):
+    if target.is_dir() and not skill.owns(target) and not skill.legacy(target) and any(target.iterdir()):
         raise skill.unmanaged(target)
     target.mkdir(parents=True, exist_ok=True)
     _write(target / skill.marker, f'This skill is managed by {skill.cli}. Manual edits will be overwritten on upgrade.\n', skill)
@@ -115,6 +123,12 @@ def remove(home: Path, skill: Skill) -> dict:
 def refresh(home: Path, skill: Skill) -> bool:
     """Bring an owned copy up to date after an upgrade; silent and cheap."""
     target = skill.dir(home)
+    if skill.legacy(target):
+        try:
+            install(home, skill)
+            return True
+        except (OSError, Unmanaged):
+            return False
     try:
         if not skill.owns(target) or (target / VERSION_FILE).read_text() == skill.version:
             return False

@@ -66,3 +66,22 @@ class SkillTests(unittest.TestCase):
         result = subprocess.run([sys.executable, str(ROOT / 'bin/cloud-contacts'), 'skill', 'install'], env=env, capture_output=True, text=True)
         self.assertEqual(result.returncode, 1)
         self.assertEqual(json.loads(result.stdout)['error']['code'], 'skill_unmanaged')
+
+
+class LegacyTests(unittest.TestCase):
+    def test_adopts_only_a_pre_marker_copy_when_enabled(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            target = home / '.agents/skills/cloud-contacts'
+            target.mkdir(parents=True)
+            (target / 'SKILL.md').write_text('old')
+            with self.assertRaises(agent_skill.Unmanaged):
+                agent_skill.install(home, SKILL)  # this CLI never wrote unmarked copies
+            legacy = agent_skill.Skill('cloud-contacts', 'cloud-contacts', '9', SKILL.source, adopts_legacy=True)
+            self.assertTrue(agent_skill.refresh(home, legacy))
+            self.assertEqual((target / 'SKILL.md').read_text(), SKILL.body)
+            (target / 'notes.md').write_text('mine')
+            for name in ('.managed-by-cloud-contacts', '.installed-version'):
+                (target / name).unlink()
+            with self.assertRaises(agent_skill.Unmanaged):
+                agent_skill.install(home, legacy)

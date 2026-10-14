@@ -154,8 +154,7 @@ cloud-contacts skill remove
 ```
 
 A new release refreshes the installed copy automatically; only a copy cloud-contacts
-wrote (marked `.managed-by-cloud-contacts`) is ever changed. Before cloud-contacts is
-installed: `npx skills add ferdousbhai/cloud-contacts -g`.
+wrote (marked `.managed-by-cloud-contacts`) is ever changed.
 
 ## Develop / remove
 
