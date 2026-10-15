@@ -8,11 +8,14 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Adw, GLib, Gtk
 from .common import Failure
+from .theme import install as install_theme
 
 
 class Window(Adw.ApplicationWindow):
     def __init__(self, app, service):
         super().__init__(application=app, title='Cloud Contacts' if service.product == 'cloud-contacts' else 'Cloud Tasks')
+        install_theme()
+        self.add_css_class("cloud-desktop")
         self.service = service
         self.contacts = service.product == 'cloud-contacts'
         self.worker = ThreadPoolExecutor(max_workers=1)
@@ -28,14 +31,24 @@ class Window(Adw.ApplicationWindow):
         outer.append(header)
         for text, action in [('Refresh', self.refresh), ('New', self.new), ('Edit', self.edit),
                              ('Delete', self.delete), ('Details', lambda: self.details(self.selected()) if self.selected() else None), ('Accounts', self.accounts)]:
-            button = Gtk.Button(label=text)
+            icons = {'Refresh': 'view-refresh-symbolic', 'Edit': 'document-edit-symbolic',
+                     'Delete': 'user-trash-symbolic', 'Details': 'dialog-information-symbolic',
+                     'Accounts': 'preferences-system-symbolic'}
+            button = Gtk.Button(label='New contact' if self.contacts else 'New task') if text == 'New' else Gtk.Button(icon_name=icons[text])
+            button.set_tooltip_text(text)
+            if text == 'New':
+                button.add_css_class('suggested-action')
             button.connect('clicked', lambda _button, fn=action: fn())
             header.pack_start(button) if text in ['Refresh', 'New'] else header.pack_end(button)
         if self.contacts:
             toolbar = Gtk.Box(spacing=8, margin_start=12, margin_end=12, margin_top=8)
+            toolbar.add_css_class("record-tools")
             for text, action in [('Merge selected identities', self.merge), ('Unmerge selected', self.unmerge),
                                  ('Find matching contacts', self.candidates)]:
-                button = Gtk.Button(label=text)
+                captions = {'Merge selected identities': 'Merge selected', 'Unmerge selected': 'Unmerge',
+                            'Find matching contacts': 'Find matches'}
+                button = Gtk.Button(label=captions[text])
+                button.set_tooltip_text(text)
                 button.connect('clicked', lambda _button, fn=action: fn())
                 toolbar.append(button)
             outer.append(toolbar)
@@ -48,11 +61,14 @@ class Window(Adw.ApplicationWindow):
         self.search.connect('search-changed', lambda _: self.render())
         outer.append(self.search)
         self.message = Gtk.Label(wrap=True, xalign=0, margin_start=12, margin_end=12, margin_bottom=8)
+        self.message.add_css_class('record-notice')
+        self.message.set_visible(False)
+        self.message.connect('notify::label', lambda label, _: label.set_visible(bool(label.get_label().strip())))
         outer.append(self.message)
         scroll = Gtk.ScrolledWindow(vexpand=True)
         self.listbox = Gtk.ListBox(selection_mode=Gtk.SelectionMode.MULTIPLE if self.contacts else Gtk.SelectionMode.SINGLE)
         self.listbox.set_activate_on_single_click(False)
-        self.listbox.add_css_class('boxed-list')
+        self.listbox.add_css_class('record-list')
         self.listbox.connect('row-activated', lambda _, row: self.details(row.data))
         scroll.set_child(self.listbox)
         outer.append(scroll)
@@ -127,12 +143,18 @@ class Window(Adw.ApplicationWindow):
                     self.run(lambda: self.service.edit(identity, completion=completed))
                 check.connect('toggled', toggle)
                 box.append(check)
+            if self.contacts:
+                avatar = Gtk.Image(icon_name='avatar-default-symbolic', pixel_size=20)
+                avatar.add_css_class('record-icon')
+                box.append(avatar)
             labelbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True, spacing=4)
-            labelbox.append(Gtk.Label(label=name, xalign=0, wrap=True))
+            title = Gtk.Label(label=name, xalign=0, wrap=True)
+            title.add_css_class('record-title')
+            labelbox.append(title)
             due = (data.get('due') or {}).get('date', '')
             secondary += (' · ' + due) if due else ''
-            detail = Gtk.Label(label=secondary + '\n' + data['id'], xalign=0, wrap=True, selectable=True)
-            detail.add_css_class('dim-label')
+            detail = Gtk.Label(label=secondary, xalign=0, wrap=True, selectable=True)
+            detail.add_css_class('record-detail')
             labelbox.append(detail)
             box.append(labelbox)
             if data.get('conflicts') or data.get('missing_sources'):
@@ -148,6 +170,7 @@ class Window(Adw.ApplicationWindow):
 
     def form(self, title, fields, action, help_text=''):
         dialog = Gtk.Window(title=title, transient_for=self, modal=True, default_width=520)
+        dialog.add_css_class("cloud-desktop")
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12, margin_start=18, margin_end=18, margin_top=18, margin_bottom=18)
         dialog.set_child(box)
         if help_text:
@@ -263,6 +286,7 @@ class Window(Adw.ApplicationWindow):
 
     def details(self, data):
         dialog = Gtk.Window(title='Details', transient_for=self, default_width=640, default_height=520)
+        dialog.add_css_class("cloud-desktop")
         scroll = Gtk.ScrolledWindow()
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12, margin_start=18, margin_end=18, margin_top=18, margin_bottom=18)
         scroll.set_child(box)
@@ -311,6 +335,7 @@ class Window(Adw.ApplicationWindow):
 
     def accounts(self):
         dialog = Gtk.Window(title='Accounts', transient_for=self, default_width=560, default_height=360)
+        dialog.add_css_class("cloud-desktop")
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12, margin_start=18, margin_end=18, margin_top=18, margin_bottom=18)
         dialog.set_child(box)
         for name, cfg in self.service.accounts().items():
