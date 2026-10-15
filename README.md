@@ -191,3 +191,9 @@ Arch packaging declares the legacy package replaced/conflicting. A source
 installation is not a pacman transaction: after the new provider is built and
 installed, remove the legacy package with the package manager. No provider data
 or cache directories should be deleted during retirement.
+
+## Optional Recall search
+
+Use `~ QUERY` in the Contacts search field, or `cloud-contacts list --semantic QUERY`. Only current account/source records are ranked.
+
+Recall is an optional extra. Normal operation never contacts it. Missing, incompatible, busy, or warming-up Recall leaves contact text search available. Requests run in the background with a bounded wait. This project does not install Recall, download embedding weights, or start its own model runtime. When enabled, the owner-local Recall service owns one shared model cache and inference worker; records stay on this machine.

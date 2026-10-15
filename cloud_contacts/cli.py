@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 from . import __version__, agent_skill, cli_output
 from .common import Failure
+from . import recall_client
 from .service import Contacts
 
 
@@ -32,6 +33,7 @@ def parser():
     remove.add_argument('name')
     remove.add_argument('--yes', action='store_true')
     listing = sub.add_parser('list', help='list/search the unified address book')
+    listing.add_argument('--semantic', metavar='QUERY', help='rank current account/list records with local Recall; text fallback when unavailable')
     listing.add_argument('query', nargs='?', default='')
     listing.add_argument('--account')
     listing.add_argument('--sources', action='store_true')
@@ -65,6 +67,14 @@ def parser():
 
 def dispatch(service, args):
     if args.command == 'list':
+        if args.semantic:
+            rows, warnings = service.list('', args.account, args.sources)
+            ids = recall_client.rank('cloud-contacts', args.semantic, recall_client.records(rows))
+            if ids is None:
+                rows, warnings = service.list(args.semantic, args.account, args.sources)
+                return rows, [*warnings, {'account': '', 'message': 'Recall unavailable or warming up; showing text matches.'}]
+            by_id = {row['id']: row for row in rows}
+            return [by_id[identity] for identity in ids], warnings
         return service.list(args.query, args.account, args.sources)
     if args.command == 'show':
         return service.show(args.id)

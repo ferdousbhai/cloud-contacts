@@ -7,6 +7,8 @@ import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Adw, GLib, Gtk
+import json
+from . import recall_client
 from .common import Failure
 from .theme import install as install_theme
 
@@ -19,10 +21,14 @@ class Window(Adw.ApplicationWindow):
         self.service = service
         self.contacts = service.product == 'cloud-contacts'
         self.worker = ThreadPoolExecutor(max_workers=1)
+        self.semantic_worker = ThreadPoolExecutor(max_workers=1)
+        self.semantic_future = None
         self.rows = []
         self.alive = True
         self.busy = False
         self.notice = ''
+        self.semantic_key = None
+        self.semantic_ids = None
         self.set_default_size(880, 680)
         self.connect('close-request', self.closed)
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -59,7 +65,11 @@ class Window(Adw.ApplicationWindow):
         self.search = Gtk.SearchEntry(placeholder_text='Search contacts' if self.contacts else 'Search tasks',
                                      margin_start=12, margin_end=12, margin_top=8, margin_bottom=8)
         self.search.connect('search-changed', lambda _: self.render())
+        self.search.set_placeholder_text('Search contacts · ~ meaning' if self.contacts else 'Search tasks · ~ meaning')
         outer.append(self.search)
+        self.semantic_hint = Gtk.Label(xalign=0, margin_start=12, margin_end=12)
+        self.semantic_hint.add_css_class('record-notice')
+        outer.append(self.semantic_hint)
         self.message = Gtk.Label(wrap=True, xalign=0, margin_start=12, margin_end=12, margin_bottom=8)
         self.message.add_css_class('record-notice')
         self.message.set_visible(False)
@@ -82,6 +92,7 @@ class Window(Adw.ApplicationWindow):
     def closed(self, *_):
         self.alive = False
         self.worker.shutdown(wait=False, cancel_futures=True)
+        self.semantic_worker.shutdown(wait=False, cancel_futures=True)
         return False
 
     def run(self, operation, done=None):
@@ -126,11 +137,43 @@ class Window(Adw.ApplicationWindow):
     def render(self):
         while (child := self.listbox.get_first_child()) is not None:
             self.listbox.remove(child)
-        needle = self.search.get_text().casefold()
-        for data in self.rows:
+        raw_query = self.search.get_text()
+        semantic = raw_query.startswith('~') and bool(raw_query[1:].strip())
+        needle = (raw_query[1:].strip() if semantic else raw_query).casefold()
+        visible_rows = self.rows
+        if semantic:
+            key = (needle, json.dumps(self.rows, sort_keys=True))
+            if self.semantic_key != key:
+                self.semantic_key, self.semantic_ids = key, None
+                self.semantic_hint.set_text('Searching by meaning with local Recall…')
+                snapshot = recall_client.records(self.rows)
+                if self.semantic_future is not None:
+                    self.semantic_future.cancel()
+                future = self.semantic_worker.submit(recall_client.rank, self.service.product, needle, snapshot)
+                self.semantic_future = future
+                def ready():
+                    if not self.alive or self.semantic_key != key:
+                        return False
+                    try:
+                        self.semantic_ids = future.result()
+                    except Exception:
+                        self.semantic_ids = None
+                    self.semantic_hint.set_text('Semantic matches · local Recall' if self.semantic_ids is not None
+                                                else 'Recall unavailable or warming up · showing text matches')
+                    self.render()
+                    return False
+                future.add_done_callback(lambda _: GLib.idle_add(ready))
+            if self.semantic_ids is not None:
+                by_id = {row['id']: row for row in self.rows}
+                visible_rows = [by_id[identity] for identity in self.semantic_ids if identity in by_id]
+        else:
+            self.semantic_key, self.semantic_ids = None, None
+            self.semantic_hint.set_text('')
+        self.semantic_hint.set_visible(semantic)
+        for data in visible_rows:
             name = data.get('name' if self.contacts else 'title', '')
             secondary = ', '.join(item['value'] for item in data.get('emails', [])) if self.contacts else data.get('list', '')
-            if needle not in (name + ' ' + secondary).casefold():
+            if not (semantic and self.semantic_ids is not None) and needle not in (name + ' ' + secondary).casefold():
                 continue
             row = Gtk.ListBoxRow()
             row.data = data
