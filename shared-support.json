@@ -1,0 +1,10 @@
+{
+  "product": "cloud-contacts",
+  "groups": {
+    "common.py": "a4f0d52c47369057cfb991ca2f9f9b393f9aa1fc141810edbdacca2b77ee14da",
+    "cli_output.py": "54570ed9fa24a3f95a118fd2904f7180261ba87c87ed240f7d3eefcca48d1ba5",
+    "theme.py": "a6fe11c8f462bcc3dd985769e04e72a72adb9210c466d2977ff2df71e56a65b4",
+    "recall_client.py": "713c4cef6840190ec13e9742f82c37efce8b79678f949db75c7417842ec15d0f",
+    "agent_skill.py": "af73360f1e2119655f1f707b07d14200160621b6655bf05eaa4b79de57b9b746"
+  }
+}
