@@ -46,22 +46,56 @@ class Fake:
 fake=Fake()
 app=Adw.Application(application_id='com.ferdousbhai.test')
 app.register(None)
-w=Window(app,fake);w.present()
+class CountingWindow(Window):
+ def setup_row(self,factory,item):
+  self.setup_count=getattr(self,'setup_count',0)+1
+  super().setup_row(factory,item)
+w=CountingWindow(app,fake);w.present()
 ctx=GLib.MainContext.default()
 def pump():
  for _ in range(35):
   while ctx.pending(): ctx.iteration(False)
   time.sleep(.01)
 pump()
-assert w.listbox.get_first_child() is not None
-row=w.listbox.get_first_child();w.listbox.select_row(row)
+assert w.visible_records.get_n_items() == 2
+record=w.visible_records.get_item(0);w.selection.select_item(0,False)
+# Search filters lightweight records and clears hidden selection.
+w.search.set_text('no fixture matches');w.render()
+assert w.visible_records.get_n_items() == 0 and w.selection.get_selection().is_empty()
+w.search.set_text('');w.render()
+assert w.visible_records.get_item(0) is record
+# Changing semantic queries reuses the dataset snapshot; refresh invalidates it.
+from unittest.mock import patch
+from cloud_contacts import recall_client
+ids=[record['id'] for record in reversed(w.rows)]
+with patch.object(recall_client,'records',wraps=recall_client.records) as records, patch.object(recall_client,'rank',return_value=ids):
+ w.search.set_text('~ first');w.render();pump()
+ assert w.visible_records.get_item(0).data['id'] == ids[0]
+ w.search.set_text('~ second');w.render();pump()
+ assert records.call_count == 1
+ w.refresh();pump()
+ assert records.call_count == 2
+w.search.set_text('');w.render()
+w.selection.select_item(0,False)
 w.edit();w.details(w.rows[0]);w.accounts();w.delete();w.new();pump()
 if fake.product=='cloud-contacts':
- w.listbox.select_row(w.listbox.get_last_child());w.merge()
-else:
- check=w.listbox.get_first_child().get_child().get_first_child()
- check.set_active(True);pump()
- assert fake.edits[0][1]['completion'] is True
+ w.selection.select_item(w.visible_records.get_n_items()-1,False);w.merge()
+# Large contact lists must not instantiate one GTK widget tree per record.
+before=w.setup_count
+large=[{'id':f'icloud:{i}','name':f'Person {i}','emails':[],'phones':[]} for i in range(10000)]
+w.loaded((large,[]));pump()
+created=w.setup_count-before
+assert created < 1000, created
+assert w.visible_records.get_n_items() == 10000
+w.selection.select_item(9999,False)
+assert w.selected()['id'] == 'icloud:9999'
+w.search.set_text('person 9999');w.render();pump()
+assert w.visible_records.get_n_items() == 1
+assert w.selected()['id'] == 'icloud:9999'
+print(f'10000 contacts used {created} new GTK row widgets')
+# A refreshed/relinked dataset must not silently carry an old selection.
+w.loaded((large,[]));pump()
+assert w.selection.get_selection().is_empty()
 for window in Gtk.Window.list_toplevels(): window.close()
 pump()
 print('Native cloud-contacts workflows passed on private Broadway + D-Bus')

@@ -6,11 +6,19 @@ from pathlib import Path
 import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
-from gi.repository import Adw, GLib, Gtk
-import json
+from gi.repository import Adw, Gio, GLib, GObject, Gtk
 from . import recall_client
 from .common import Failure
 from .theme import install as install_theme
+
+
+class Record(GObject.Object):
+    def __init__(self, data, contacts):
+        super().__init__()
+        self.data = data
+        self.name = data.get('name' if contacts else 'title', '')
+        self.secondary = ', '.join(item['value'] for item in data.get('emails', [])) if contacts else data.get('list', '')
+        self.search_text = (self.name + ' ' + self.secondary).casefold()
 
 
 class Window(Adw.ApplicationWindow):
@@ -24,6 +32,10 @@ class Window(Adw.ApplicationWindow):
         self.semantic_worker = ThreadPoolExecutor(max_workers=1)
         self.semantic_future = None
         self.rows = []
+        self.rows_version = 0
+        self.records = []
+        self.records_by_id = {}
+        self.semantic_snapshot = None
         self.alive = True
         self.busy = False
         self.notice = ''
@@ -76,10 +88,18 @@ class Window(Adw.ApplicationWindow):
         self.message.connect('notify::label', lambda label, _: label.set_visible(bool(label.get_label().strip())))
         outer.append(self.message)
         scroll = Gtk.ScrolledWindow(vexpand=True)
-        self.listbox = Gtk.ListBox(selection_mode=Gtk.SelectionMode.MULTIPLE if self.contacts else Gtk.SelectionMode.SINGLE)
-        self.listbox.set_activate_on_single_click(False)
+        self.visible_records = Gio.ListStore(item_type=Record)
+        self.selection = Gtk.MultiSelection(model=self.visible_records) if self.contacts else Gtk.SingleSelection(model=self.visible_records)
+        if not self.contacts:
+            self.selection.set_autoselect(False)
+            self.selection.set_can_unselect(True)
+        factory = Gtk.SignalListItemFactory()
+        factory.connect('setup', self.setup_row)
+        factory.connect('bind', self.bind_row)
+        self.listbox = Gtk.ListView(model=self.selection, factory=factory)
+        self.listbox.set_single_click_activate(False)
         self.listbox.add_css_class('record-list')
-        self.listbox.connect('row-activated', lambda _, row: self.details(row.data))
+        self.listbox.connect('activate', lambda _, position: self.details(self.visible_records.get_item(position).data))
         scroll.set_child(self.listbox)
         outer.append(scroll)
         if hasattr(self.service, 'migrate_legacy'):
@@ -129,24 +149,28 @@ class Window(Adw.ApplicationWindow):
 
     def loaded(self, result):
         self.rows, warnings = result
+        self.rows_version += 1
+        self.semantic_snapshot = None
+        self.records = [Record(data, self.contacts) for data in self.rows]
+        self.records_by_id = {record.data['id']: record for record in self.records}
         self.message.set_text(self.notice + '\n' + '\n'.join('Partial results: ' + warning.get('account', '') + ': ' + warning['message'] for warning in warnings))
         if not self.rows and not warnings and not self.notice:
             self.message.set_text('No contacts found.' if self.contacts else 'No tasks found.')
         self.render()
 
     def render(self):
-        while (child := self.listbox.get_first_child()) is not None:
-            self.listbox.remove(child)
         raw_query = self.search.get_text()
         semantic = raw_query.startswith('~') and bool(raw_query[1:].strip())
         needle = (raw_query[1:].strip() if semantic else raw_query).casefold()
-        visible_rows = self.rows
+        visible_records = self.records
         if semantic:
-            key = (needle, json.dumps(self.rows, sort_keys=True))
+            key = (needle, self.rows_version)
             if self.semantic_key != key:
                 self.semantic_key, self.semantic_ids = key, None
                 self.semantic_hint.set_text('Searching by meaning with local Recall…')
-                snapshot = recall_client.records(self.rows)
+                if self.semantic_snapshot is None:
+                    self.semantic_snapshot = recall_client.records(self.rows)
+                snapshot = self.semantic_snapshot
                 if self.semantic_future is not None:
                     self.semantic_future.cancel()
                 future = self.semantic_worker.submit(recall_client.rank, self.service.product, needle, snapshot)
@@ -164,52 +188,80 @@ class Window(Adw.ApplicationWindow):
                     return False
                 future.add_done_callback(lambda _: GLib.idle_add(ready))
             if self.semantic_ids is not None:
-                by_id = {row['id']: row for row in self.rows}
-                visible_rows = [by_id[identity] for identity in self.semantic_ids if identity in by_id]
+                visible_records = [self.records_by_id[identity] for identity in self.semantic_ids if identity in self.records_by_id]
         else:
             self.semantic_key, self.semantic_ids = None, None
             self.semantic_hint.set_text('')
         self.semantic_hint.set_visible(semantic)
-        for data in visible_rows:
-            name = data.get('name' if self.contacts else 'title', '')
-            secondary = ', '.join(item['value'] for item in data.get('emails', [])) if self.contacts else data.get('list', '')
-            if not (semantic and self.semantic_ids is not None) and needle not in (name + ' ' + secondary).casefold():
-                continue
-            row = Gtk.ListBoxRow()
-            row.data = data
-            box = Gtk.Box(spacing=10, margin_start=12, margin_end=12, margin_top=12, margin_bottom=12)
-            row.set_child(box)
-            if not self.contacts:
-                check = Gtk.CheckButton(active=data.get('completed', False), valign=Gtk.Align.CENTER)
-                def toggle(widget, identity=data['id']):
+        if not (semantic and self.semantic_ids is not None):
+            visible_records = [record for record in self.records if needle in record.search_text]
+        self.update_visible(visible_records)
+
+    def update_visible(self, records):
+        # Splice only the changed range so GTK can recycle visible widgets and
+        # leave unaffected selection/scroll positions alone.
+        previous = list(self.visible_records)
+        start = 0
+        while start < min(len(previous), len(records)) and previous[start] is records[start]:
+            start += 1
+        if start == len(previous) == len(records):
+            return
+        end = 0
+        while end < min(len(previous), len(records)) - start and previous[-end - 1] is records[-end - 1]:
+            end += 1
+        selected = self.selection.get_selection()
+        selected_records = {self.visible_records.get_item(selected.get_nth(index)) for index in range(selected.get_size())}
+        self.visible_records.splice(start, len(previous) - start - end, records[start:len(records) - end])
+        self.selection.unselect_all()
+        for index, record in enumerate(records):
+            if record in selected_records:
+                self.selection.select_item(index, False)
+
+    def setup_row(self, _factory, item):
+        box = Gtk.Box(spacing=10, margin_start=12, margin_end=12, margin_top=12, margin_bottom=12)
+        if not self.contacts:
+            item.check = Gtk.CheckButton(valign=Gtk.Align.CENTER)
+            def toggle(widget):
+                if not getattr(item, 'binding', False) and item.get_item() is not None:
+                    identity = item.get_item().data['id']
                     completed = widget.get_active()
                     self.run(lambda: self.service.edit(identity, completion=completed))
-                check.connect('toggled', toggle)
-                box.append(check)
-            if self.contacts:
-                avatar = Gtk.Image(icon_name='avatar-default-symbolic', pixel_size=20)
-                avatar.add_css_class('record-icon')
-                box.append(avatar)
-            labelbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True, spacing=4)
-            title = Gtk.Label(label=name, xalign=0, wrap=True)
-            title.add_css_class('record-title')
-            labelbox.append(title)
-            due = (data.get('due') or {}).get('date', '')
-            secondary += (' · ' + due) if due else ''
-            detail = Gtk.Label(label=secondary, xalign=0, wrap=True, selectable=True)
-            detail.add_css_class('record-detail')
-            labelbox.append(detail)
-            box.append(labelbox)
-            if data.get('conflicts') or data.get('missing_sources'):
-                box.append(Gtk.Label(label='Source differences'))
-            self.listbox.append(row)
+            item.check.connect('toggled', toggle)
+            box.append(item.check)
+        else:
+            avatar = Gtk.Image(icon_name='avatar-default-symbolic', pixel_size=20)
+            avatar.add_css_class('record-icon')
+            box.append(avatar)
+        labels = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True, spacing=4)
+        item.title = Gtk.Label(xalign=0, wrap=True)
+        item.title.add_css_class('record-title')
+        labels.append(item.title)
+        item.detail = Gtk.Label(xalign=0, wrap=True, selectable=True)
+        item.detail.add_css_class('record-detail')
+        labels.append(item.detail)
+        box.append(labels)
+        item.conflicts = Gtk.Label(label='Source differences')
+        box.append(item.conflicts)
+        item.set_child(box)
+
+    def bind_row(self, _factory, item):
+        record = item.get_item()
+        item.title.set_text(record.name)
+        due = (record.data.get('due') or {}).get('date', '')
+        item.detail.set_text(record.secondary + (' · ' + due if due else ''))
+        item.conflicts.set_visible(bool(record.data.get('conflicts') or record.data.get('missing_sources')))
+        if not self.contacts:
+            item.binding = True
+            item.check.set_active(bool(record.data.get('completed', False)))
+            item.binding = False
 
     def selected(self, single=True):
-        rows = self.listbox.get_selected_rows()
-        if not rows or (single and len(rows) != 1):
+        selected = self.selection.get_selection()
+        if selected.is_empty() or (single and selected.get_size() != 1):
             self.message.set_text('Select one record.' if single else 'Select contacts to merge.')
             return None
-        return rows[0].data if single else [row.data for row in rows]
+        rows = [self.visible_records.get_item(selected.get_nth(index)).data for index in range(selected.get_size())]
+        return rows[0] if single else rows
 
     def form(self, title, fields, action, help_text=''):
         dialog = Gtk.Window(title=title, transient_for=self, modal=True, default_width=520)
