@@ -66,23 +66,23 @@ class InstallerTests(unittest.TestCase):
 
 
 class VerificationTests(unittest.TestCase):
-    def test_exact_release_and_native_architecture(self):
+    def test_exact_release_and_native_arm_image(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            (root / 'bin').mkdir()
-            (root / 'bin/verify-release').write_text((ROOT / 'bin/verify-release').read_text())
             executable(root / 'uname', 'echo aarch64\n')
-            executable(root / 'bin/arch-run', 'printf "%s\\0" "$@" > "$CALL_LOG"\n')
+            executable(root / 'docker', 'printf "%s\\0" "$@" > "$CALL_LOG"\n')
             log = root / 'args'
-            env = dict(os.environ, PATH=f'{root}:{os.environ["PATH"]}', CALL_LOG=str(log))
-            subprocess.run(['bash', str(root / 'bin/verify-release'), '0.4.2', 'aarch64'], env=env, check=True)
+            env = dict(os.environ, PATH=f'{root}:{os.environ["PATH"]}', CALL_LOG=str(log), ARM_BUILD_IMAGE='test-arm:latest')
+            subprocess.run(['bash', str(ROOT / 'bin/verify-release'), '0.4.2', 'aarch64'], env=env, check=True)
             args = log.read_bytes().decode().split('\0')[:-1]
             self.assertIn('CLOUD_CONTACTS_RELEASES_URL=https://github.com/ferdousbhai/cloud-contacts/releases/download/v0.4.2', args)
             self.assertIn('EXPECTED_ARCH=aarch64', args)
+            self.assertIn('test-arm:latest', args)
+            self.assertIn('linux/arm64', args)
             self.assertNotIn('releases/latest', '\n'.join(args))
             subprocess.run(['bash', '-n'], input=args[-1], text=True, check=True)
             log.unlink()
-            result = subprocess.run(['bash', str(root / 'bin/verify-release'), '0.4.2', 'x86_64'], env=env, capture_output=True)
+            result = subprocess.run(['bash', str(ROOT / 'bin/verify-release'), '0.4.2', 'x86_64'], env=env, capture_output=True)
             self.assertNotEqual(result.returncode, 0)
             self.assertFalse(log.exists())
 
