@@ -1,0 +1,19 @@
+#!/bin/bash
+# Verify exactly one published release on its native architecture. No automatic deletion.
+set -euo pipefail
+version=${1:?usage: bin/verify-release <version> [x86_64|aarch64]}
+[[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Invalid version' >&2; exit 1; }
+arch=${2:-$(uname -m)}
+case "$arch" in x86_64|aarch64) ;; *) echo "Unsupported architecture: $arch" >&2; exit 1 ;; esac
+[[ $(uname -m) == "$arch" ]] || { echo 'A native runner is required.' >&2; exit 1; }
+cd "$(dirname "$0")/.."
+releases=https://github.com/ferdousbhai/cloud-contacts/releases/download/v$version
+exec bin/arch-run env EXPECTED_VERSION="$version" EXPECTED_ARCH="$arch" \
+  CLOUD_CONTACTS_RELEASES_URL="$releases" bash -euo pipefail -c '
+    [[ $(uname -m) == "$EXPECTED_ARCH" ]]
+    curl --fail --location --retry 3 "$CLOUD_CONTACTS_RELEASES_URL/install.sh" -o /tmp/install.sh
+    bash /tmp/install.sh
+    [[ $(pacman -Q cloud-contacts | cut -d" " -f2) == "$EXPECTED_VERSION-1" ]]
+    [[ $(cloud-contacts --version) == "cloud-contacts $EXPECTED_VERSION" ]]
+    test -x /usr/lib/cloud-contacts/libexec/cloud-contacts-icloud
+  '

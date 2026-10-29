@@ -15,3 +15,24 @@ are explicit. Preserve unknown fields, account IDs, and partial-result warnings.
 CLI output, errors and exit codes follow the shared product contract in `cloud_contacts/cli_output.py`
 (text on a terminal, JSON envelope when piped; exit 0/1/2 usage/3 auth/4 not found/5 unavailable). Keep that
 file identical across product repositories.
+
+## Packaging and releases
+
+```sh
+bash packaging/repo/test.sh && python3 packaging/repo/test_arch.py   # installer/release tests (in bin/check)
+bin/build-package "$(uname -m)"  # full package build as a regular Arch user
+sudo bin/arch-run bin/build-package "$(uname -m)" /output  # disposable native Arch chroot
+```
+
+`packaging/aur/cloud-contacts/PKGBUILD` is the package recipe; `bin/build-package` builds it from the
+committed source. Pushing a `v*` tag runs `.github/workflows/packages.yml` (Native packages), which
+builds and uploads the x86_64 and aarch64 packages as artifacts.
+
+Release: bump `version` in `pyproject.toml`, `cloud_contacts/__init__.py`, `icloud/Cargo.toml` (and
+`icloud/Cargo.lock`) and `pkgver` in the PKGBUILD together, tag `vX.Y.Z`, push the tag, draft the
+GitHub release (`gh release create vX.Y.Z --draft --verify-tag --generate-notes`), then
+`bin/release X.Y.Z`: it waits for the Native packages run, signs both packages and repository
+databases with the maintainer key (only in the local keyring, never CI), uploads them with
+`install.sh`, `SHA256SUMS` and the signing key, and publishes. Publishing runs
+`verify-release.yml`; `bin/verify-release X.Y.Z <arch>` verifies on a native host. Do not run
+release scripts unless asked.

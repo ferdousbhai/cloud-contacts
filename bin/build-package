@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Build committed source with native Arch tools; signing stays on the maintainer's machine.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+architecture=${1:?usage: bin/build-package <x86_64|aarch64> [output-directory]}
+case "$architecture" in x86_64|aarch64) ;; *) echo "Unsupported architecture: $architecture" >&2; exit 1 ;; esac
+[[ $(uname -m) == "$architecture" ]] || { echo 'A native runner is required.' >&2; exit 1; }
+if (( EUID == 0 )); then
+  [[ ${CLOUD_CONTACTS_ARCH_ROOT:-} == 1 ]] || { echo 'Run as a regular Arch user, or through bin/arch-run.' >&2; exit 1; }
+  pacman -S --needed --noconfirm base-devel cargo git python python-gobject gtk4 libadwaita
+  exec runuser -u builder -- "$PWD/bin/build-package" "$@"
+fi
+for tool in makepkg cargo bsdtar; do
+  command -v "$tool" >/dev/null || { echo "Native Arch build requires $tool on PATH." >&2; exit 1; }
+done
+version=$(git -c safe.directory="$PWD" show HEAD:pyproject.toml | sed -n 's/^version = "\(.*\)"$/\1/p' | head -1)
+[[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+output=$(realpath -m "${2:-target/packages/$architecture}")
+export CARGO_TARGET_DIR=$(realpath -m "${CARGO_TARGET_DIR:-$PWD/target/package-cache/$architecture/compiler}")
+mkdir -p "$output" "$CARGO_TARGET_DIR"
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+commit=$(git -c safe.directory="$PWD" rev-parse HEAD)
+git -c safe.directory="$PWD" archive --prefix="cloud-contacts-$version/" "$commit" | gzip -n > "$work/source.tar.gz"
+git -c safe.directory="$PWD" show "$commit":packaging/aur/cloud-contacts/PKGBUILD > "$work/PKGBUILD"
+sum=$(sha256sum "$work/source.tar.gz" | cut -d" " -f1)
+sed -i -e 's|^source=.*|source=(source.tar.gz)|' -e "s/^sha256sums=.*/sha256sums=('$sum')/" "$work/PKGBUILD"
+(cd "$work" && PKGDEST="$output" PKGEXT=.pkg.tar.zst makepkg --force)
+package="$output/cloud-contacts-$version-1-$architecture.pkg.tar.zst"
+info=$(bsdtar -xOf "$package" .PKGINFO)
+grep -qxF 'pkgname = cloud-contacts' <<< "$info"
+grep -qxF "pkgver = $version-1" <<< "$info"
+grep -qxF "arch = $architecture" <<< "$info"
+bsdtar -tf "$package" | grep -qxF usr/lib/cloud-contacts/libexec/cloud-contacts-icloud
+[[ $(bsdtar -xOf "$package" usr/lib/cloud-contacts/cloud_contacts/__init__.py) == "__version__ = \"$version\"" ]]
+printf '%s\n' "$commit" > "$output/source-commit.txt"

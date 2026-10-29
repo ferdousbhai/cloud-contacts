@@ -6,6 +6,17 @@ session nor a second Google API implementation.
 
 ## Install
 
+On Omarchy or Arch Linux (x86_64 or aarch64), install the signed package:
+
+```sh
+curl -fsSL https://github.com/ferdousbhai/cloud-contacts/releases/latest/download/install.sh | sudo bash
+```
+
+It trusts the package-signing key, adds the `[cloud-contacts]` pacman repository
+and installs the package; updates then arrive with `omarchy update`.
+
+### From source
+
 Python 3.10+ runs the CLI without Python packages. Source installation also needs
 Rust/Cargo to build the bundled private iCloud provider. The app additionally needs
 PyGObject, GTK4, and libadwaita (Omarchy/Arch packages `python-gobject`, `gtk4`,
@@ -23,8 +34,8 @@ cloud-contacts --app
 The source installer copies the app and launcher into `~/.local`, including a
 native application-menu entry. Make sure `~/.local/bin` is on PATH. An optional
 first argument sets another prefix; no sudo is needed for a user-owned prefix.
-Re-run the installer after updating the checkout. `packaging/PKGBUILD` builds a
-local Arch package; there is no published signed package repository yet.
+Re-run the installer after updating the checkout. `bin/build-package "$(uname -m)"`
+builds the Arch package from the committed source.
 
 ## Accounts
 

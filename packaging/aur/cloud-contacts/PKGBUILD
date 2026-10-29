@@ -1,28 +1,42 @@
+# Maintainer: Ferdous Bhai <23114244+ferdousbhai@users.noreply.github.com>
 pkgname=cloud-contacts
-pkgver=0.2.0
+pkgver=0.3.0
 pkgrel=1
 pkgdesc='Unified iCloud and Google contacts with a native GTK app'
 arch=('x86_64' 'aarch64')
-makedepends=('rust' 'cargo' 'git')
 url='https://github.com/ferdousbhai/cloud-contacts'
 license=('MIT')
 depends=('python' 'python-gobject' 'gtk4' 'libadwaita')
+makedepends=('cargo' 'git')
+options=('!debug' '!lto')  # makepkg's C LTO breaks ring's assembly objects
 optdepends=('icloud-session: shared Apple sign-in' 'xdg-terminal-exec: sign-in from the app')
 replaces=('icloud-contacts')
 conflicts=('icloud-contacts')
-# Run makepkg from packaging/ in a checked-out release tree.
-source=()
-sha256sums=()
-build() {
-  "$startdir/../bin/build-icloud"
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')  # bin/build-package pins the committed source archive's checksum
+
+_srcdir() { echo "$srcdir/cloud-contacts-$pkgver"; }
+
+prepare() {
+  cd "$(_srcdir)"
+  cargo fetch --locked --manifest-path icloud/Cargo.toml --target "$CARCH-unknown-linux-gnu"
 }
+
+build() {
+  cd "$(_srcdir)"
+  export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-icloud/target}"
+  cargo build --frozen --release --manifest-path icloud/Cargo.toml
+}
+
 check() {
-  cd "$startdir/.."
-  cargo test --locked --manifest-path icloud/Cargo.toml
+  cd "$(_srcdir)"
+  export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-icloud/target}"
+  cargo test --frozen --manifest-path icloud/Cargo.toml
   python -m unittest discover -s tests
 }
+
 package() {
-  cd "$startdir/.."
+  cd "$(_srcdir)"
   install -d "$pkgdir/usr/lib/cloud-contacts" "$pkgdir/usr/bin"
   install -Dm755 "${CARGO_TARGET_DIR:-icloud/target}/release/cloud-contacts-icloud" "$pkgdir/usr/lib/cloud-contacts/libexec/cloud-contacts-icloud"
   cp -r cloud_contacts bin skills "$pkgdir/usr/lib/cloud-contacts/"
