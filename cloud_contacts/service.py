@@ -73,10 +73,11 @@ class Contacts(Context):
                            group.get('bindings', {}).get(item) == accounts.get(split_id(item)[0], {}).get('identity')]
                 if not present:
                     continue
-                grouped.update(item['id'] for item in present)
+                present_ids = {item['id'] for item in present}
+                grouped.update(present_ids)
                 primary = next((item for item in present if item['id'] == group['primary']), present[0])
                 contact = {'id': identity, 'name': primary['name'], 'primary': group['primary'],
-                           'sources': present, 'missing_sources': [item for item in group['sources'] if item not in {source['id'] for source in present}],
+                           'sources': present, 'missing_sources': [item for item in group['sources'] if item not in present_ids],
                            'emails': [], 'phones': [], 'urls': [], 'addresses': [], 'conflicts': {},
                            **{field: primary.get(field) for field in ['first', 'middle', 'last', 'nickname', 'company', 'notes', 'birthday']}}
                 for field in ['emails', 'phones', 'urls', 'addresses']:
@@ -136,13 +137,14 @@ class Contacts(Context):
         if primary and primary not in selected:
             raise Failure('invalid_request', '--primary must be a selected source contact ID')
         preferred = primary or selected[0]
+        selected_ids = set(selected)
         plan = {'sources': selected, 'primary': preferred, 'provider_records_changed': False, 'applied': yes}
         if not yes:
             return plan
         accounts = self.accounts()
         def apply(data):
             groups = data['groups']
-            overlapping = [key for key, group in groups.items() if any(item in selected and
+            overlapping = [key for key, group in groups.items() if any(item in selected_ids and
                            group.get('bindings', {}).get(item) == accounts[split_id(item)[0]].get('identity')
                            for item in group['sources'])]
             identity = overlapping[0] if overlapping else 'person:' + str(uuid.uuid4())
@@ -224,7 +226,10 @@ class Contacts(Context):
             if values:
                 body[field] = list(current.get(field, []))
                 existing = {item.get('value') for item in body[field]}
-                body[field].extend({'value': value} for value in values if value not in existing)
+                for value in values:
+                    if value not in existing:
+                        body[field].append({'value': value})
+                        existing.add(value)
                 masks.append(field)
         if raw:
             params['updatePersonFields'] = ','.join(masks)

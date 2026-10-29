@@ -115,3 +115,11 @@ class ContactTests(unittest.TestCase):
                 self.service.write(identity, source=self.google['id'], first='Changed')
             self.assertEqual(caught.exception.code, 'stale_source')
             call.assert_not_called()
+
+    def test_google_edit_deduplicates_requested_values_without_changing_existing_fields(self):
+        current = self.google['source']
+        with patch.object(self.service, 'google', side_effect=[current, current]) as call:
+            self.service.write(self.google['id'], emails=['new@example.com', 'new@example.com', 'ALEX@example.com'])
+        body = call.call_args.args[3]
+        self.assertEqual(body['emailAddresses'], [*current['emailAddresses'], {'value': 'new@example.com'}])
+        self.assertEqual(body['metadata'], current['metadata'])
