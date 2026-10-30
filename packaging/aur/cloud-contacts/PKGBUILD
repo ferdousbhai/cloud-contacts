@@ -39,7 +39,9 @@ package() {
   cd "$(_srcdir)"
   install -d "$pkgdir/usr/lib/cloud-contacts" "$pkgdir/usr/bin"
   install -Dm755 "${CARGO_TARGET_DIR:-icloud/target}/release/cloud-contacts-icloud" "$pkgdir/usr/lib/cloud-contacts/libexec/cloud-contacts-icloud"
-  cp -r cloud_contacts bin skills "$pkgdir/usr/lib/cloud-contacts/"
+  # Only the entry point from bin/: the rest are the repository's build and release scripts.
+  cp -r cloud_contacts skills "$pkgdir/usr/lib/cloud-contacts/"
+  install -Dm755 bin/cloud-contacts "$pkgdir/usr/lib/cloud-contacts/bin/cloud-contacts"
   find "$pkgdir/usr/lib/cloud-contacts" -name __pycache__ -type d -exec rm -r {} +
   printf '%s\n' '#!/bin/sh' 'exec python /usr/lib/cloud-contacts/bin/cloud-contacts "$@"' > "$pkgdir/usr/bin/cloud-contacts"
   chmod 755 "$pkgdir/usr/bin/cloud-contacts"
