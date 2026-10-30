@@ -1,6 +1,6 @@
 # Maintainer: Ferdous Bhai <23114244+ferdousbhai@users.noreply.github.com>
 pkgname=cloud-contacts
-pkgver=0.3.0
+pkgver=0.3.2
 pkgrel=1
 pkgdesc='Unified iCloud and Google contacts with a native GTK app'
 arch=('x86_64' 'aarch64')
