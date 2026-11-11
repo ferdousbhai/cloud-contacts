@@ -6,6 +6,14 @@ session nor a second Google API implementation.
 
 ## Install
 
+Coming from a Mac? One command installs this together with the other iCloud apps (Mail, Calendar, Contacts, Reminders, Notes, Photos and Find My) and signs you in to iCloud once for all of them ([what it does](https://ferdousbhai.com/icloud)):
+
+```sh
+curl -fsSL https://ferdousbhai.com/icloud/install.sh | sudo bash
+```
+
+To install only this app:
+
 On Omarchy or Arch Linux (x86_64 or aarch64), install the signed package:
 
 ```sh
