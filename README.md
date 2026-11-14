@@ -1,5 +1,13 @@
 # Cloud Contacts
 
+> **Retired on 2026-11-14.** Cloud Contacts is no longer developed and gets no more releases.
+> Its place is taken by **iCloud Contacts** (`icloud-contacts`), part of
+> [iCloud for Omarchy](https://github.com/ferdousbhai/icloud-for-omarchy), where iCloud is the
+> one source of truth and there is no Google side. Install it with
+> `curl -fsSL https://ferdousbhai.com/icloud-contacts/install.sh | sudo bash`: the `icloud-contacts` package
+> replaces `cloud-contacts` and the installer removes this repository from pacman. What follows
+> describes the last release, 0.3.2.
+
 Your iCloud and Google contacts in one address book: a native GTK4/libadwaita
 app and a JSON CLI for Ghost or any local agent. Ships its product-owned iCloud backend and Google Workspace `gws`; it owns neither an Apple
 session nor a second Google API implementation.
