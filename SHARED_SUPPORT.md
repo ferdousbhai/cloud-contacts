@@ -48,8 +48,7 @@ is reported separately as a product source copy/digest mismatch.
 `icloud-for-omarchy/tests/test_shared_support.py` tests drift detection, standalone
 checks, missing files and digest recording using disposable fixture checkouts.
 
-Cloud Contacts was retired on 2026-11-14 and came back on 2026-11-18 as a
-Rust app that shows iCloud and Google contacts side by side; it shares
-`agent_skill.rs` again. Until the canonical checker in icloud-for-omarchy
-lists it, this repository's `bin/check` checks its own recorded digest alone
-(see `bin/check`).
+Cloud Tasks, which shared Python support files, was retired on 2026-11-14 for
+`icloud-reminders` in icloud-for-omarchy. Cloud Contacts was retired the same
+day and came back on 2026-11-18 as a Rust app that shows iCloud and Google
+contacts side by side; it shares `agent_skill.rs` again.
