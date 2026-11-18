@@ -1,226 +1,76 @@
 # Cloud Contacts
 
-> **Retired on 2026-11-14.** Cloud Contacts is no longer developed and gets no more releases.
-> Its place is taken by **iCloud Contacts** (`icloud-contacts`), part of
-> [iCloud for Omarchy](https://github.com/ferdousbhai/icloud-for-omarchy), where iCloud is the
-> one source of truth and there is no Google side. Install it with
-> `curl -fsSL https://ferdousbhai.com/icloud-contacts/install.sh | sudo bash`: the `icloud-contacts` package
-> replaces `cloud-contacts` and the installer removes this repository from pacman. What follows
-> describes the last release, 0.3.2.
+Your iCloud and Google contacts side by side on [Omarchy](https://omarchy.org) (and any Arch
+Linux): a GTK4/libadwaita window and a command line for scripts and AI agents. Search, call,
+email, add, edit, delete and export as vCard, in either account.
 
-Your iCloud and Google contacts in one address book: a native GTK4/libadwaita
-app and a JSON CLI for Ghost or any local agent. Ships its product-owned iCloud backend and Google Workspace `gws`; it owns neither an Apple
-session nor a second Google API implementation.
+Each contact lives in one account, and a change goes to that account alone. Your iCloud and
+Google contacts are never copied into each other: the window shows them together, labelled, with
+a filter for one account.
 
 ## Install
 
-Coming from a Mac? One command installs this together with the other iCloud apps (Mail, Calendar, Contacts, Reminders, Notes, Photos and Find My) and signs you in to iCloud once for all of them ([what it does](https://ferdousbhai.com/icloud)):
+On Omarchy or Arch Linux (x86_64 or aarch64):
 
 ```sh
-curl -fsSL https://ferdousbhai.com/icloud/install.sh | sudo bash
+curl -fsSL https://ferdousbhai.com/cloud-contacts/install.sh | sudo bash
 ```
 
-To install only this app:
-
-On Omarchy or Arch Linux (x86_64 or aarch64), install the signed package:
-
-```sh
-curl -fsSL https://github.com/ferdousbhai/cloud-contacts/releases/latest/download/install.sh | sudo bash
-```
-
-It trusts the package-signing key, adds the `[cloud-contacts]` pacman repository
-and installs the package; updates then arrive with `omarchy update`.
-
-### From source
-
-Python 3.10+ runs the CLI without Python packages. Source installation also needs
-Rust/Cargo to build the bundled private iCloud provider. The app additionally needs
-PyGObject, GTK4, and libadwaita (Omarchy/Arch packages `python-gobject`, `gtk4`,
-`libadwaita`). Install those dependencies with `omarchy pkg add` if missing.
-Only `icloud-session` is needed for Apple sign-in; `gws` supplies Google access.
-The retired icloud-contacts package is not a dependency.
-
-```sh
-git clone https://github.com/ferdousbhai/cloud-contacts.git
-cd cloud-contacts
-./install.sh
-cloud-contacts --app
-```
-
-The source installer copies the app and launcher into `~/.local`, including a
-native application-menu entry. Make sure `~/.local/bin` is on PATH. An optional
-first argument sets another prefix; no sudo is needed for a user-owned prefix.
-Re-run the installer after updating the checkout. `bin/build-package "$(uname -m)"`
-builds the Arch package from the committed source.
+It trusts the package-signing key, adds the `[cloud-contacts]` pacman repository and installs the
+package; updates then arrive with `omarchy update`. The package replaces `icloud-contacts`, iCloud
+for Omarchy's Contacts app: your iCloud contacts appear here on the first run, through the same
+iCloud sign-in.
 
 ## Accounts
 
 ```sh
-cloud-contacts account add icloud
-cloud-contacts account add google --name work
-cloud-contacts account list
+cloud-contacts account add icloud    # through icloud-session, the iCloud sign-in your iCloud apps share
+cloud-contacts account add google    # in your browser, through Google's Workspace CLI (gws)
+cloud-contacts status                # what is linked, and signed in
 ```
 
-iCloud uses the one Apple account already held by `icloud-session`. If needed,
-run `icloud-session sign-in` yourself. Install its CLI/apps from
-[icloud-for-omarchy](https://github.com/ferdousbhai/icloud-for-omarchy).
+The window's accounts menu does the same. iCloud needs `icloud-session` (from
+[iCloud for Omarchy](https://github.com/ferdousbhai/icloud-for-omarchy)); Google needs `gws`:
+`npm install -g @googleworkspace/cli`. Cloud Contacts keeps Google's sign-in in its own
+directory, `~/.config/cloud-contacts/gws/<account>`, apart from any gws setup of yours. Unlinking
+an account forgets it on this computer; its contacts stay in the account.
 
-Install Google Workspace CLI with `npm install -g @googleworkspace/cli` or its
-[release binary](https://github.com/googleworkspace/cli). Each Google account
-gets its own directory under `~/.config/cloud-contacts/gws/<name>`. For a new
-account, configure an OAuth client there using `gws`'s documented setup; e.g.
-in your own terminal (the automated setup needs `gcloud`):
+## Everyday use
+
+- **Browse and search**: every contact, sorted by last name, each labelled with its account. The
+  filter above the list shows one account.
+- **Copy, call, email**: a click copies a phone number or address; emails and links open.
+- **Add**: the new contact goes to the account you pick (the one the filter shows, to start).
+- **Edit**: names, company, phones, emails, URLs, birthday and notes. What the window does not
+  show (photos, social profiles, Google's labels and groups) stays as the account has it.
+- **Delete**: from the account it is in, on every device. iCloud keeps no Recently Deleted for
+  contacts; Google keeps them in its Trash for 30 days.
+
+## Command line
 
 ```sh
-GOOGLE_WORKSPACE_CLI_CONFIG_DIR="$HOME/.config/cloud-contacts/gws/work" gws auth setup
-cloud-contacts account login work
+cloud-contacts list [QUERY] [--account NAME]
+cloud-contacts show CONTACT            # an ID (icloud:..., google:people/...), `me`, a name, an email or a phone
+cloud-contacts add --account google --first Ann --last Lee --phone work=+1 555 0100
+cloud-contacts edit CONTACT --job-title Manager --remove-email old@example.com
+cloud-contacts delete CONTACT --yes
+cloud-contacts export [CONTACT...] -o contacts.vcf
+cloud-contacts refresh                 # fetch every account now
 ```
 
-Login requests only the Contacts scope. The People API must be enabled for the
-OAuth client's Google Cloud project. Manual OAuth setup is supported by `gws`;
-never paste passwords, callback URLs, or tokens into an agent conversation.
-Alternatively explicitly use an already configured Google account directory:
+Text on a terminal, a JSON envelope when piped (`--json`, `--quiet`, `--ids-only`, `--count`).
+An account that fails while the others answer is a warning (`meta.warnings`), not an error.
+Exit codes: 2 usage or ambiguous, 3 not signed in or nothing linked, 4 not found, 5 an account
+out of reach. `cloud-contacts --help` has the rest. For coding agents, `cloud-contacts skill
+install` installs the agent skill.
+
+## From source
 
 ```sh
-cloud-contacts account add google --name personal --gws-config ~/.config/gws
+cargo build --release        # needs gtk4 and libadwaita for the window
+target/release/cloud-contacts --help
 ```
 
-Only explicit `--gws-config` opts into sharing an existing credential context.
-Ambient access-token/credential-file overrides are removed for provider calls;
-Cloudmail's and Cloud Calendar's sign-ins are not read or expanded. `gws` owns
-its encrypted credential files and its file-backend encryption key.
+## License
 
-The native Accounts window links accounts, opens terminal sign-in, and unlinks
-accounts. Removing an account from this app keeps its provider data and
-credentials. In the CLI, `account remove NAME` previews and `--yes` applies it.
-
-## Read and identify
-
-```sh
-cloud-contacts list
-cloud-contacts list 'Alex'
-cloud-contacts list --account work
-cloud-contacts list --sources
-cloud-contacts show 'Alex Smith'
-cloud-contacts candidates
-```
-
-Every command emits `{ok, data, meta: {warnings}}`; `--json` is accepted anywhere
-options are accepted. A provider failure preserves other accounts' results and
-appears in warnings. If every selected account fails, the command fails instead
-of claiming the address book is empty. There is no automatic background sync.
-Reads use the providers' normal refresh behavior, including their local caches.
-
-IDs are opaque, account-prefixed strings; copy them from output. Names used for
-`show` must identify exactly one contact. Candidates require matching email or
-fully qualified international phone numbers, never a name or phone suffix alone.
-A shared email/phone is evidence, not proof; confirm the person before merging.
-
-## Merge confirmed identities
-
-```sh
-cloud-contacts merge 'icloud:<id>' 'work:<id>'
-cloud-contacts merge 'icloud:<id>' 'work:<id>' --yes
-cloud-contacts unmerge 'person:<id>' --yes
-```
-
-Replace placeholders with returned IDs. Without `--yes`, merge/unmerge previews
-without changing files. Merges create a stable `person:` identity in the local
-unified address book. Emails, phones, URLs, and addresses are combined; every
-source record is retained with its provenance, including fields this version
-doesn't edit. Different names/notes/etc. remain visible as conflicts. The first
-selected source supplies the display name; `--primary SOURCE_ID` chooses another.
-
-The source services are not rewritten or deduplicated. Unmerge restores their
-separate presentation. An unavailable or deleted source is marked missing,
-never silently discarded. Reusing an unlinked account name does not reattach
-its old identity bindings to the new account. Identity groups live in `identities.json` beside the
-account config, written atomically under a file lock. Back it up to preserve
-merges across reinstalls/machines.
-
-## Write to a source
-
-```sh
-cloud-contacts add --account work --first Alex --last Smith --email 'alex@example.com'
-cloud-contacts edit 'work:<id>' --phone '+14155550100'
-cloud-contacts edit 'person:<id>' --source 'work:<id>' --first Alexander
-cloud-contacts delete 'work:<id>'
-cloud-contacts delete 'work:<id>' --yes
-```
-
-Edits target exactly one source, including for merged contacts. Names can be
-changed/cleared; emails and phones are added without replacing existing values.
-Google edits fetch current contact-source metadata/etags and update only named
-fields, preserving unrelated data. Conflicts are returned instead of retried.
-iCloud writes use the bundled backend's concurrency/field-preservation rules.
-Deletion affects that provider (iCloud contacts have no Recently Deleted).
-Unmerge is the way to split the local identity without deleting provider data.
-
-The desktop app supports search, details/provenance, creation, edits, deletion,
-matching suggestions, multi-select merge, unmerge, and account management. Native
-writes use exactly the CLI's service layer and never automatically follow merge
-suggestions. Double-click a row or choose Details to inspect it.
-
-## First-version limits
-
-Linux only; a CLI-first application core plus GTK frontend. No cross-provider
-replication, automatic identity merges, provider-side deduplication, Google
-organization directory/Other Contacts, or contact photo editing. Google OAuth
-client setup is delegated to `gws`, not bundled app credentials. Live-account
-behavior still needs an owner-authorized integration pass; automated tests use
-fake providers exclusively.
-
-## Agent skill
-
-[skills/cloud-contacts/SKILL.md](skills/cloud-contacts/SKILL.md) teaches AI agents to install,
-link, and use cloud-contacts. It ships with the CLI:
-
-```sh
-cloud-contacts skill install   # ~/.agents/skills/cloud-contacts, linked into ~/.claude/skills
-cloud-contacts skill remove
-```
-
-A new release refreshes the installed copy automatically; only a copy cloud-contacts
-wrote (marked `.managed-by-cloud-contacts`) is ever changed.
-
-## Develop / remove
-
-```sh
-bin/check                              # every check; .githooks/pre-push runs it before a push
-git config core.hooksPath .githooks    # once per clone
-```
-
-The native test uses a private Broadway display, private D-Bus, temporary HOME,
-and fake data, never the owner's desktop or accounts. No runtime dependencies
-beyond Python for CLI operation; no separate HTTP service or database.
-
-To remove a source install, remove its launcher at `~/.local/bin/cloud-contacts`,
-its menu entry under `~/.local/share/applications/`, and its application directory
-`~/.local/share/cloud-contacts`. Account configuration/identity merges under
-`~/.config/cloud-contacts` are intentionally retained.
-
-MIT licensed.
-
-## Replacing the legacy app
-
-The legacy standalone app is retired. This product ships the extracted Rust
-backend privately under its application directory, with protocol/fixture tests;
-there is no subprocess dependency on the legacy CLI or its package. The shared
-`icloud-session` service remains responsible for Apple sign-in.
-
-Run `cloud-contacts migrate` to adopt an existing Apple cache without contacting
-Apple or copying/moving files. The first native-app launch also adopts it.
-Legacy cache paths are intentionally retained so account identity, sync tokens,
-and existing records remain valid. Unlinking the account records that migration
-is handled, so a later run does not silently relink it.
-
-Arch packaging declares the legacy package replaced/conflicting. A source
-installation is not a pacman transaction: after the new provider is built and
-installed, remove the legacy package with the package manager. No provider data
-or cache directories should be deleted during retirement.
-
-## Optional Recall search
-
-Use `~ QUERY` in the Contacts search field, or `cloud-contacts list --semantic QUERY`. Only current account/source records are ranked.
-
-Recall is an optional extra. Normal operation never contacts it. Missing, incompatible, busy, or warming-up Recall leaves contact text search available. Requests run in the background with a bounded wait. This project does not install Recall, download embedding weights, or start its own model runtime. When enabled, the owner-local Recall service owns one shared model cache and inference worker; records stay on this machine.
+MIT. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
