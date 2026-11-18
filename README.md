@@ -4,9 +4,9 @@ Your iCloud and Google contacts side by side on [Omarchy](https://omarchy.org) (
 Linux): a GTK4/libadwaita window and a command line for scripts and AI agents. Search, call,
 email, add, edit, delete and export as vCard, in either account.
 
-Each contact lives in one account, and a change goes to that account alone. Your iCloud and
-Google contacts are never copied into each other: the window shows them together, labelled, with
-a filter for one account.
+Each contact lives in one account, and a change goes to that account alone: the window shows
+both accounts together, labelled, with a filter for one. If you want, Cloud Contacts can also keep
+your iCloud and Google contacts the same ([below](#keeping-icloud-and-google-the-same)).
 
 ## Install
 
@@ -45,6 +45,42 @@ an account forgets it on this computer; its contacts stay in the account.
   show (photos, social profiles, Google's labels and groups) stays as the account has it.
 - **Delete**: from the account it is in, on every device. iCloud keeps no Recently Deleted for
   contacts; Google keeps them in its Trash for 30 days.
+
+## Keeping iCloud and Google the same
+
+With an iCloud and a Google account both linked, you can have them kept the same: a contact
+added, changed or deleted in one is added, changed or deleted in the other. It is off until you
+turn it on: the window offers it at the top (Turn On… or Not Now) and has a switch, "Keep iCloud
+and Google contacts the same", below the contacts, with how it stands under it. From the command
+line:
+
+```sh
+cloud-contacts keep-same          # on or off, how many are linked, the last run, any problem
+cloud-contacts keep-same on       # asks first; then a timer keeps them the same every few minutes
+cloud-contacts keep-same run      # now
+cloud-contacts keep-same off      # both accounts keep their contacts as they are
+```
+
+- **Turning it on** joins contacts already in both accounts (a shared email or phone and a
+  similar name) instead of copying them, and lists the doubtful ones for you to call one person
+  or two (`keep-same pair` / `keep-same apart`, or in the window); neither is copied until you
+  decide. Everything else is copied to the other account.
+- **What crosses**: names, nickname, company, job title, department, birthday, notes, phones,
+  emails, URLs and addresses. **What never crosses**: photos, Google's labels and groups, and the
+  fields only iCloud has (social profiles, related names and the like); each account keeps its
+  own, and nothing of them is removed.
+- **Changed on both sides**: phones, emails, URLs and addresses are joined, without duplicates; a
+  single field takes the later change (iCloud's when the times are unknown, with a warning).
+- **Guards**: a run that would delete more than 10 contacts, or more than half the linked ones,
+  stops and lists them until you confirm with `keep-same run --yes`. When an account can't be
+  read, a run changes nothing.
+- **When**: the timer runs while this computer is on; changes made on your phone cross once a
+  computer with Cloud Contacts is awake. Unlinking either account turns it off; both keep their
+  contacts.
+
+`cloud-contacts duplicates` lists contacts that may be one person (the same email, phone or
+name), in one account or across both, and `cloud-contacts merge CONTACT CONTACT [--keep
+ACCOUNT]` joins two into one and deletes the other (it asks first).
 
 ## Command line
 

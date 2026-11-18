@@ -27,6 +27,12 @@ One crate, `crates/cloud-contacts`:
 - `src/config.rs` — `~/.config/cloud-contacts/config.toml` and the first run (Cloud Contacts
   0.3's `config.json`, or the iCloud account when icloud-session is signed in);
   `src/accounts.rs` — link, sign in again, unlink, status.
+- `src/keep_same.rs` — keeping iCloud and Google the same (opt-in): the shared fields
+  (`Shared`), the three-way merge, pairing and duplicates, the crash-safe run (`Engine`, read its
+  header first), the state in `<data>/keep-same.json`, and what the window shows (`shown`).
+  `packaging/systemd/cloud-contacts-keep-same.{service,timer}` run it; `keep-same on` enables the
+  timer (`CLOUD_CONTACTS_SYSTEMCTL` in tests). `tests/keep_same.rs`: two in-memory accounts,
+  every merge rule and guard, a run killed after each write, random sequences that must converge.
 - `src/cli.rs` — the command line; `src/main.rs` its GTK-free binary; `src/bin/app/` the window
   (`cloud-contacts-app`, feature `ui`). `src/agent_skill.rs` is a shared copy (SHARED_SUPPORT.md).
 - `examples/fake_contacts.rs` — a fake iCloud server (`ICLOUD_SESSION_MOCK=1`); `tests/fake-gws`
