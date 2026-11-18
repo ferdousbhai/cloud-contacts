@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Contacts
+GenericName=Contacts
+Comment=Your iCloud and Google contacts: search, call, email, add and edit
+Exec=cloud-contacts-app
+Icon=com.ferdousbhai.cloudcontacts
+Terminal=false
+Categories=Office;ContactManagement;
+Keywords=contacts;address book;people;phone;email;iCloud;apple;Google;
+StartupNotify=true
+StartupWMClass=com.ferdousbhai.cloudcontacts

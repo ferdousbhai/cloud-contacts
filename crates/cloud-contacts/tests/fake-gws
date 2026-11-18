@@ -1,0 +1,114 @@
+#!/usr/bin/env python3
+"""A stand-in for Google's `gws` CLI, for tests: the People API calls Cloud
+Contacts makes, on an address book kept in $FAKE_GWS_STATE (JSON).
+
+- `auth login`: prints a sign-in link and writes credentials.enc in
+  $GOOGLE_WORKSPACE_CLI_CONFIG_DIR, as gws does.
+- `people people connections list|get|createContact|updateContact|deleteContact`
+  with `--params JSON [--json BODY]`. updateContact refuses a stale etag as
+  Google does (400 FAILED_PRECONDITION) and replaces exactly the fields in
+  updatePersonFields.
+- Without credentials.enc: exit 2 (gws's auth failure). $FAKE_GWS_OFFLINE set:
+  exit 4 (Google unreachable). $FAKE_GWS_PAGE: page size of connections list.
+Every call is appended to the state's "calls".
+"""
+import json, os, sys
+
+state_path = os.environ['FAKE_GWS_STATE']
+conf = os.environ.get('GOOGLE_WORKSPACE_CLI_CONFIG_DIR', '')
+args = sys.argv[1:]
+
+def load():
+    try:
+        with open(state_path) as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {'people': {}, 'seq': 0, 'calls': []}
+
+def save(s):
+    with open(state_path + '.tmp', 'w') as f:
+        json.dump(s, f)
+    os.replace(state_path + '.tmp', state_path)
+
+def fail(code, http, message, status=''):
+    print(json.dumps({'error': {'code': http, 'message': message, 'status': status}}))
+    sys.exit(code)
+
+if args[:2] == ['auth', 'login']:
+    print('Open this link: https://accounts.google.com/o/oauth2/auth?fake=1', flush=True)
+    os.makedirs(conf, exist_ok=True)
+    open(os.path.join(conf, 'credentials.enc'), 'w').write('fake')
+    sys.exit(0)
+
+s = load()
+s['calls'].append({'args': args, 'config_dir': conf})
+save(s)
+if os.environ.get('FAKE_GWS_OFFLINE'):
+    fail(4, 0, 'error sending request: dns error')
+if not os.path.isfile(os.path.join(conf, 'credentials.enc')):
+    fail(2, 401, 'No credentials found')
+if args[:2] != ['people', 'people']:
+    fail(3, 0, 'unknown command')
+rest = args[2:]
+opts = {}
+i = 0
+method = []
+while i < len(rest):
+    if rest[i] in ('--params', '--json'):
+        opts[rest[i]] = json.loads(rest[i + 1])
+        i += 2
+    else:
+        method.append(rest[i])
+        i += 1
+params = opts.get('--params', {})
+body = opts.get('--json')
+people = s['people']
+
+def stamp(p):
+    s['seq'] += 1
+    p['etag'] = 'etag-%d' % s['seq']
+    p.setdefault('metadata', {})['sources'] = [{'type': 'CONTACT', 'updateTime': '2026-11-18T00:00:%02dZ' % (s['seq'] % 60)}]
+    return p
+
+if method == ['connections', 'list']:
+    names = sorted(people)
+    size = int(os.environ.get('FAKE_GWS_PAGE', params.get('pageSize', 1000)))
+    start = int(params.get('pageToken', 0))
+    page = {'connections': [people[n] for n in names[start:start + size]], 'totalPeople': len(names)}
+    if start + size < len(names):
+        page['nextPageToken'] = str(start + size)
+    print(json.dumps(page))
+elif method == ['get']:
+    p = people.get(params['resourceName'])
+    if p is None:
+        fail(1, 404, 'Requested entity was not found.', 'NOT_FOUND')
+    print(json.dumps(p))
+elif method == ['createContact']:
+    s['seq'] += 1
+    p = dict(body)
+    p['resourceName'] = 'people/c%d' % s['seq']
+    people[p['resourceName']] = stamp(p)
+    save(s)
+    print(json.dumps(p))
+elif method == ['updateContact']:
+    name = params['resourceName']
+    p = people.get(name)
+    if p is None:
+        fail(1, 404, 'Requested entity was not found.', 'NOT_FOUND')
+    if body.get('etag') != p['etag']:
+        fail(1, 400, 'Request person.etag is different than the current person.etag. Clear local cache and get the latest person.', 'FAILED_PRECONDITION')
+    for field in params['updatePersonFields'].split(','):
+        if field in body:
+            p[field] = body[field]
+        else:
+            p.pop(field, None)
+    people[name] = stamp(p)
+    save(s)
+    print(json.dumps(p))
+elif method == ['deleteContact']:
+    if people.pop(params['resourceName'], None) is None:
+        fail(1, 404, 'Requested entity was not found.', 'NOT_FOUND')
+    save(s)
+    print('{}')
+else:
+    fail(3, 0, 'unknown method ' + ' '.join(method))

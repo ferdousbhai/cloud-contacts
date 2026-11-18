@@ -1,0 +1,51 @@
+[package]
+name = "cloud-contacts"
+version.workspace = true
+edition.workspace = true
+description = "Your iCloud and Google contacts side by side on Omarchy: browse, search, add, edit and delete"
+license.workspace = true
+repository.workspace = true
+publish = false
+default-run = "cloud-contacts"
+
+[lib]
+name = "cloud_contacts"
+
+# The command line. It never calls into GTK, so it links without GTK and
+# starts fast; with no command it runs cloud-contacts-app.
+[[bin]]
+name = "cloud-contacts"
+path = "src/main.rs"
+
+# The window (and, given a command, the command line too). Its code is in
+# the binary, so none of it can reach the library the command line links.
+[[bin]]
+name = "cloud-contacts-app"
+path = "src/bin/app/main.rs"
+required-features = ["ui"]
+
+# The library (accounts, both providers, the caches, vCard, the command line)
+# needs no GTK, so `cargo test --no-default-features` runs on a machine
+# without the GTK stack.
+[features]
+default = ["ui"]
+ui = ["dep:icloud-app-ui", "dep:gtk", "dep:adw"]
+
+[dependencies]
+icloud-session.workspace = true
+icloud-app.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+toml.workspace = true
+url.workspace = true
+uuid.workspace = true
+gtk = { workspace = true, optional = true }
+adw = { workspace = true, optional = true }
+icloud-app-ui = { workspace = true, optional = true }
+
+[dev-dependencies]
+icloud-app = { workspace = true, features = ["testing"] }
+tempfile.workspace = true
+tiny_http.workspace = true
