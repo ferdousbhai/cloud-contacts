@@ -10,9 +10,9 @@ gh_repo=ferdousbhai/cloud-contacts
 fingerprint=52130299581DAD685226900CA89CA1A6A1E74251
 step() { printf '\n==> %s\n' "$*"; }
 source_commit=$(git rev-parse "$tag^{commit}")
-project_version=$(git show "$source_commit:pyproject.toml" | sed -n 's/^version = "\(.*\)"$/\1/p' | head -1)
-[[ $project_version == "$version" ]] \
-  || { echo "pyproject.toml at $tag says version ${project_version:-<none>}, not $version." >&2; exit 1; }
+cargo_version=$(git show "$source_commit:Cargo.toml" | sed -n 's/^version = "\(.*\)"$/\1/p' | head -1)
+[[ $cargo_version == "$version" ]] \
+  || { echo "Cargo.toml at $tag says version ${cargo_version:-<none>}, not $version." >&2; exit 1; }
 remote_commit=$(gh api "repos/$gh_repo/commits/$tag" --jq .sha)
 [[ $source_commit == "$remote_commit" ]] || { echo 'Local and remote tags disagree.' >&2; exit 1; }
 gpg --batch --list-secret-keys "$fingerprint" >/dev/null 2>&1 \

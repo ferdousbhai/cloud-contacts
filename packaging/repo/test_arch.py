@@ -33,7 +33,7 @@ class InstallerTests(unittest.TestCase):
             executable(binary / 'install', 'while [[ $# -gt 0 ]]; do case "$1" in -d) shift;; -o|-g) shift 2;; *) mkdir -p "$1"; shift;; esac; done\n')
             executable(binary / 'uname', f'echo {arch}\n')
             executable(binary / 'curl', 'while [[ $1 != -o ]]; do shift; done; echo public-key > "$2"\n')
-            executable(binary / 'gpg', "echo 'fpr:::::::::52130299581DAD685226900CA89CA1A6A1E74251:'\n")
+            executable(binary / 'gpg', "printf 'pub:u:4096:1:A89CA1A6A1E74251:1:::u:::scESC:\\nfpr:::::::::52130299581DAD685226900CA89CA1A6A1E74251:\\n'\n")
             executable(binary / 'getent', f"echo 'root:x:0:0::{home}:/bin/bash'\n")
             for command in ('pacman-key', 'pacman', 'omarchy-pkg-add'):
                 executable(binary / command, 'echo "$0 $*" >> "$CALL_LOG"\n')
@@ -94,7 +94,7 @@ class PackageBuildTests(unittest.TestCase):
             (root / 'bin').mkdir()
             (root / 'packaging/aur/cloud-contacts').mkdir(parents=True)
             (root / 'bin/build-package').write_text((ROOT / 'bin/build-package').read_text())
-            (root / 'pyproject.toml').write_text('version = "0.4.2"\n')
+            (root / 'Cargo.toml').write_text('version = "0.4.2"\n')
             recipe = root / 'packaging/aur/cloud-contacts/PKGBUILD'
             recipe.write_text('source=(original)\nsha256sums=(SKIP)\n')
             for args in (['init', '-q'], ['add', '.'], ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-qm', 'fixture']):
@@ -109,12 +109,12 @@ class PackageBuildTests(unittest.TestCase):
 grep -qx 'source=(source.tar.gz)' PKGBUILD
 sum=$(sha256sum source.tar.gz | cut -d" " -f1)
 grep -qx "sha256sums=('$sum')" PKGBUILD
-tar -tzf source.tar.gz | grep -qx cloud-contacts-0.4.2/pyproject.toml
-mkdir -p "$CARGO_TARGET_DIR/release" usr/lib/cloud-contacts/libexec usr/lib/cloud-contacts/cloud_contacts
-touch "$CARGO_TARGET_DIR/release/cloud-contacts-icloud" usr/lib/cloud-contacts/libexec/cloud-contacts-icloud
-printf '__version__ = "0.4.2"\\n' > usr/lib/cloud-contacts/cloud_contacts/__init__.py
+tar -tzf source.tar.gz | grep -qx cloud-contacts-0.4.2/Cargo.toml
+mkdir -p "$CARGO_TARGET_DIR/release"
+printf '#!/bin/sh\\necho cloud-contacts 0.4.2\\n' > "$CARGO_TARGET_DIR/release/cloud-contacts"
+chmod +x "$CARGO_TARGET_DIR/release/cloud-contacts"
 printf 'pkgname = cloud-contacts\\npkgver = 0.4.2-1\\narch = aarch64\\n' > .PKGINFO
-tar -czf "$PKGDEST/cloud-contacts-0.4.2-1-aarch64.pkg.tar.zst" .PKGINFO usr
+tar -czf "$PKGDEST/cloud-contacts-0.4.2-1-aarch64.pkg.tar.zst" .PKGINFO
 ''')
             executable(mocks / 'bsdtar', 'exec tar "$@"\n')
             cache = root / 'compiler cache'
@@ -122,7 +122,7 @@ tar -czf "$PKGDEST/cloud-contacts-0.4.2-1-aarch64.pkg.tar.zst" .PKGINFO usr
             env = dict(os.environ, PATH=f'{mocks}:{os.environ["PATH"]}', CARGO_TARGET_DIR=str(cache))
             subprocess.run(['bash', str(root / 'bin/build-package'), 'aarch64', str(output)], env=env, check=True)
             self.assertEqual((output / 'source-commit.txt').read_text().strip(), commit)
-            self.assertTrue((cache / 'release/cloud-contacts-icloud').is_file())
+            self.assertTrue((cache / 'release/cloud-contacts').is_file())
             result = subprocess.run(['bash', str(root / 'bin/build-package'), 'x86_64'], env=env, capture_output=True)
             self.assertNotEqual(result.returncode, 0)
 
@@ -134,7 +134,7 @@ class ReleaseTests(unittest.TestCase):
             (root / 'bin').mkdir()
             (root / 'packaging/repo').mkdir(parents=True)
             (root / 'bin/release').write_text((ROOT / 'bin/release').read_text())
-            (root / 'pyproject.toml').write_text('version = "0.4.2"\n')
+            (root / 'Cargo.toml').write_text('version = "0.4.2"\n')
             (root / 'packaging/repo/install.sh').write_text('installer fixture\n')
             for args in (['init', '-q'], ['add', '.'], ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-qm', 'fixture'], ['tag', 'v0.4.2']):
                 subprocess.run(['git', *args], cwd=root, check=True)

@@ -7,13 +7,13 @@ case "$architecture" in x86_64|aarch64) ;; *) echo "Unsupported architecture: $a
 [[ $(uname -m) == "$architecture" ]] || { echo 'A native runner is required.' >&2; exit 1; }
 if (( EUID == 0 )); then
   [[ ${CLOUD_CONTACTS_ARCH_ROOT:-} == 1 ]] || { echo 'Run as a regular Arch user, or through bin/arch-run.' >&2; exit 1; }
-  pacman -S --needed --noconfirm base-devel cargo git python python-gobject gtk4 libadwaita
+  pacman -S --needed --noconfirm base-devel cargo git gtk4 libadwaita
   exec runuser -u builder -- "$PWD/bin/build-package" "$@"
 fi
 for tool in makepkg cargo bsdtar; do
   command -v "$tool" >/dev/null || { echo "Native Arch build requires $tool on PATH." >&2; exit 1; }
 done
-version=$(git -c safe.directory="$PWD" show HEAD:pyproject.toml | sed -n 's/^version = "\(.*\)"$/\1/p' | head -1)
+version=$(git -c safe.directory="$PWD" show HEAD:Cargo.toml | sed -n 's/^version = "\(.*\)"$/\1/p' | head -1)
 [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
 output=$(realpath -m "${2:-target/packages/$architecture}")
 export CARGO_TARGET_DIR=$(realpath -m "${CARGO_TARGET_DIR:-$PWD/target/package-cache/$architecture/compiler}")
@@ -31,6 +31,5 @@ info=$(bsdtar -xOf "$package" .PKGINFO)
 grep -qxF 'pkgname = cloud-contacts' <<< "$info"
 grep -qxF "pkgver = $version-1" <<< "$info"
 grep -qxF "arch = $architecture" <<< "$info"
-bsdtar -tf "$package" | grep -qxF usr/lib/cloud-contacts/libexec/cloud-contacts-icloud
-[[ $(bsdtar -xOf "$package" usr/lib/cloud-contacts/cloud_contacts/__init__.py) == "__version__ = \"$version\"" ]]
+[[ $("$CARGO_TARGET_DIR/release/cloud-contacts" --version) == "cloud-contacts $version" ]]
 printf '%s\n' "$commit" > "$output/source-commit.txt"

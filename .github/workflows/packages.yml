@@ -31,7 +31,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: target/package-cache/${{ matrix.arch }}
-          key: native-${{ matrix.arch }}-${{ hashFiles('icloud/Cargo.lock', 'packaging/aur/cloud-contacts/PKGBUILD') }}
+          key: native-${{ matrix.arch }}-${{ hashFiles('Cargo.lock', 'packaging/aur/cloud-contacts/PKGBUILD') }}
           restore-keys: |
             native-${{ matrix.arch }}-
       - name: Install Arch chroot tools

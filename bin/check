@@ -1,36 +1,49 @@
 #!/bin/bash
 # Every check a change must pass, run on this machine. .githooks/pre-push runs it before a push
 # (NO_CHECK=1 skips it); enable the hook once per clone with `git config core.hooksPath .githooks`.
+# `bin/check --deep` also runs the random-exploration suites (#[ignore = "deep: ..."]).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export PATH="$HOME/.cargo/bin:$PATH"
-
-# Validate vendored support before the more expensive product checks.
-python3 bin/check-shared-support
+# Tests run the built binary with their own HOME and XDG directories; none
+# may reach this machine's config.
+unset XDG_CONFIG_HOME
 
 step() { printf '\n==> %s\n' "$*"; }
 
-step "provider: rustfmt, clippy, tests"
-cargo fmt --manifest-path icloud/Cargo.toml -- --check
-cargo clippy --locked --manifest-path icloud/Cargo.toml --all-targets -- -D warnings
-cargo test --locked --manifest-path icloud/Cargo.toml
+# Vendored support (agent_skill.rs) against its canonical copy in
+# icloud-for-omarchy. Until that repository's checker lists Cloud Contacts,
+# the siblings' checkers differ from this one: check this checkout's own
+# recorded digests alone then.
+step "shared support"
+if cmp -s bin/check-shared-support ../icloud-for-omarchy/bin/check-shared-support 2>/dev/null; then
+  python3 bin/check-shared-support
+else
+  echo "note: icloud-for-omarchy's checker does not list cloud-contacts yet; checking this checkout alone" >&2
+  python3 bin/check-shared-support --workspace-root "$(mktemp -d)"
+fi
 
-step "python tests"
-python3 -m unittest discover -s tests -v
-python3 -m compileall -q cloud_contacts
-bash -n install.sh .githooks/pre-push
+# The desktop app needs GTK 4 and libadwaita; without them only the CLI and the library are checked.
+features=()
+if ! pkg-config --exists gtk4 libadwaita-1 2>/dev/null; then
+  echo "note: skipping cloud-contacts-app (install gtk4 and libadwaita to check it)" >&2
+  features=(--no-default-features)
+fi
+
+step "rustfmt (fix with: cargo fmt --all)"
+cargo fmt --all -- --check
+step "clippy"
+cargo clippy --locked --workspace "${features[@]}" --all-targets -- -D warnings
+step "cargo test"
+cargo test --locked --workspace "${features[@]}"
+if [[ ${1:-} == --deep ]]; then
+  step "deep: random exploration"
+  cargo test --locked --workspace "${features[@]}" -- --ignored
+fi
 
 step "packaging"
 bash packaging/repo/test.sh
 python3 packaging/repo/test_arch.py
-bash -n bin/arch-run packaging/aur/cloud-contacts/PKGBUILD bin/build-package bin/release bin/verify-release
-
-# The native smoke test needs GTK 4, libadwaita and PyGObject.
-if python3 -c 'import gi; gi.require_version("Gtk", "4.0"); gi.require_version("Adw", "1")' 2>/dev/null; then
-  step "native app smoke test"
-  python3 tests/native_smoke.py
-else
-  echo "note: skipping the native smoke test (install gtk4, libadwaita and python-gobject to run it)" >&2
-fi
+bash -n bin/arch-run packaging/aur/cloud-contacts/PKGBUILD bin/build-package bin/release bin/verify-release .githooks/pre-push
 
 printf '\nAll checks passed.\n'
