@@ -2,7 +2,7 @@
 
 Your iCloud and Google contacts side by side on Omarchy/Arch: a GTK4/libadwaita window and an
 agent-friendly CLI, in Rust. Each contact lives in one account and a change goes to that account
-alone; accounts never sync with each other. Sibling of Cloud Calendar and Cloudmail.
+alone; accounts are not copied into each other unless the person turns on keep-same. Sibling of Cloud Calendar and Cloudmail.
 
 This file is for working on the code. For *using* the CLI as an agent, read
 `skills/cloud-contacts/SKILL.md` (embedded in the binary: `cloud-contacts skill [install]`).
