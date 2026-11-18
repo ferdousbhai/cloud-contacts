@@ -29,6 +29,7 @@ use crate::book::{Book, Entry, Shown};
 use crate::config;
 use crate::error::{Error, Kind};
 use crate::icloud::api::SessionTransport;
+use crate::keep_same;
 use crate::model::{self, Change, Field, Multi};
 use crate::store::Store;
 use crate::vcard;
@@ -128,6 +129,47 @@ enum Command {
     /// JSON: {accounts: [{name, provider, label, signed_in, detail}]}
     #[command(after_help = AFTER_HELP)]
     Status,
+    /// Keep your iCloud and Google contacts the same: a contact added, changed or deleted in one is in the other too (needs an iCloud and a Google account)
+    ///
+    /// Off until turned on. With no action, says how it stands. `on` first
+    /// pairs the contacts already in both accounts (a shared email or phone
+    /// and alike names), lists the doubtful ones for you (`pair` or `apart`;
+    /// neither is copied meanwhile) and copies the rest; it asks first (type
+    /// y), or needs --yes. Then a timer runs it every few minutes, or `run`
+    /// now. A run that would delete more than 10 contacts, or more than half
+    /// the linked ones, stops (too_many_deletions) until `run --yes`. Only
+    /// fields both accounts have cross; photos, Google's groups and iCloud's
+    /// other fields stay where they are.
+    ///
+    /// JSON: {on, linked, last_run, problem, warnings, waiting: [{icloud, google, why}]}
+    #[command(after_help = AFTER_HELP, name = "keep-same")]
+    KeepSame {
+        #[command(subcommand)]
+        action: Option<KeepSameAction>,
+    },
+    /// Contacts that may be one person, within an account or across them: the same email, phone or name.
+    ///
+    /// JSON: [{a, b, names: [a's, b's], why}] (contacts linked by keep-same are not listed)
+    #[command(after_help = AFTER_HELP)]
+    Duplicates,
+    /// Merge two contacts into one: the kept one gets the other's phones, emails, URLs and addresses, and fields it lacks; then the other is deleted.
+    ///
+    /// The kept one is the first named, or the one in --keep ACCOUNT. Asks
+    /// before deleting in text mode on a terminal; anywhere else --yes.
+    ///
+    /// JSON: {action: "merge", contact, deleted: {id, name}}
+    #[command(after_help = AFTER_HELP)]
+    Merge {
+        #[arg(value_name = "CONTACT")]
+        a: String,
+        #[arg(value_name = "CONTACT")]
+        b: String,
+        /// Keep the one in this account.
+        #[arg(long, value_name = "ACCOUNT")]
+        keep: Option<String>,
+        #[arg(long, short)]
+        yes: bool,
+    },
     /// Every contact, or those matching QUERY, sorted by last name.
     ///
     /// QUERY matches a name, nickname, company or email, or (digits only)
@@ -247,6 +289,37 @@ enum Command {
     Skill {
         #[command(subcommand)]
         action: Option<SkillAction>,
+    },
+}
+
+#[derive(Subcommand)]
+enum KeepSameAction {
+    /// Turn it on (pairs, then copies; asks first)
+    On {
+        #[arg(long, short)]
+        yes: bool,
+    },
+    /// Turn it off: both accounts keep their contacts as they are
+    Off,
+    /// Make them the same now
+    Run {
+        /// Confirm a run that stopped at too_many_deletions
+        #[arg(long, short)]
+        yes: bool,
+    },
+    /// Call a waiting pair one person: they are linked, not copied
+    Pair {
+        #[arg(value_name = "ICLOUD_CONTACT")]
+        icloud: String,
+        #[arg(value_name = "GOOGLE_CONTACT")]
+        google: String,
+    },
+    /// Call a waiting pair different people: each is copied to the other account
+    Apart {
+        #[arg(value_name = "ICLOUD_CONTACT")]
+        icloud: String,
+        #[arg(value_name = "GOOGLE_CONTACT")]
+        google: String,
     },
 }
 
@@ -453,6 +526,9 @@ impl Cli {
                 account,
             } => self.export(&contacts, output, account.as_deref()),
             Command::Refresh { account } => self.refresh(account.as_deref()),
+            Command::KeepSame { action } => self.keep_same(action),
+            Command::Duplicates => self.duplicates(),
+            Command::Merge { a, b, keep, yes } => self.merge(&a, &b, keep.as_deref(), yes),
             Command::Account { action } => self.account(action),
             Command::Skill { .. } => unreachable!("handled before the accounts open"),
         }
@@ -487,9 +563,14 @@ impl Cli {
             n => format!("{n} accounts"),
         };
         let ids = list.iter().map(|a| a.name.clone()).collect();
-        Response::new(json!({ "accounts": list }), summary)
-            .human(human)
-            .ids(ids)
+        let mut data = json!({ "accounts": list });
+        let mut human = human;
+        if let keep_same::Pairing::Ready(..) = keep_same::pairing_of(&self.book) {
+            let st = keep_same::load(&self.root).unwrap_or_default();
+            data["keep_same"] = keep_same::status_json(&st);
+            human.push_str(&format!("\nkeep-same: {}", keep_same_line(&st)));
+        }
+        Response::new(data, summary).human(human).ids(ids)
     }
 
     fn list(&self, query: Option<&str>, account: Option<&str>) -> Outcome {
@@ -692,15 +773,288 @@ impl Cli {
             .count(changed))
     }
 
+    /// The two accounts kept the same, or why there are not two.
+    fn pair(&self) -> Result<(&crate::book::Account, &crate::book::Account), Failure> {
+        match keep_same::pairing_of(&self.book) {
+            keep_same::Pairing::Ready(i, g) => Ok((i, g)),
+            keep_same::Pairing::Missing(p) => Err(CliError::new(
+                "needs_both_accounts",
+                EXIT_SIGN_IN,
+                "keeping contacts the same needs an iCloud and a Google account",
+            )
+            .hint(format!(
+                "link the {} one with `cloud-contacts account add {p}`",
+                crate::book::label(p)
+            ))),
+            keep_same::Pairing::Ambiguous(m) => Err(CliError::new("ambiguous", EXIT_USAGE, m)
+                .hint("unlink the Google accounts you don't want kept the same with iCloud")),
+        }
+    }
+
+    fn keep_same(&self, action: Option<KeepSameAction>) -> Outcome {
+        let (i, g) = self.pair()?;
+        let root = &self.root;
+        let status = |extra: Option<Value>, summary: String| -> Outcome {
+            let st = keep_same::load(root)?;
+            let mut data = keep_same::status_json(&st);
+            if let Some(Value::Object(m)) = extra {
+                for (k, v) in m {
+                    data[k] = v;
+                }
+            }
+            let human = format!("{summary}\n{}{}", keep_same_line(&st), waiting_lines(&st));
+            Ok(Response::new(data, summary).human(human.trim_end()))
+        };
+        let mut engine = keep_same::Engine::new(root, &*i.provider_impl, &*g.provider_impl);
+        match action {
+            None => {
+                let st = keep_same::load(root)?;
+                status(
+                    None,
+                    format!(
+                        "Keeping iCloud and Google the same: {}",
+                        if st.on { "on" } else { "off" }
+                    ),
+                )
+            }
+            Some(KeepSameAction::Off) => {
+                let was = keep_same::turn_off(root)?;
+                let warning = keep_same::timer(false);
+                let mut data = json!({});
+                warn(&mut data, warning);
+                status(
+                    Some(data),
+                    if was {
+                        "Turned off: both accounts keep their contacts as they are"
+                    } else {
+                        "It was off"
+                    }
+                    .into(),
+                )
+            }
+            Some(KeepSameAction::On { yes }) => {
+                let plan = engine.plan().map_err(run_failure)?;
+                let question = format!(
+                    "Keep iCloud and Google contacts the same? {} already in both will be linked, {} copied to Google and {} to iCloud; {} possible duplicates wait for you.",
+                    plan.pairs.len(),
+                    plan.to_google,
+                    plan.to_icloud,
+                    plan.doubtful.len()
+                );
+                confirm(self.mode, "keep-same on", yes, &question)?;
+                keep_same::turn_on(root, &plan, &[])?;
+                let mut data = json!({ "plan": plan });
+                warn(&mut data, keep_same::timer(true));
+                match engine.run(false) {
+                    Ok(report) => data["report"] = json!(report),
+                    Err(e) => warn(&mut data, Some(e.to_string())),
+                }
+                status(
+                    Some(data),
+                    "Turned on: iCloud and Google contacts are kept the same".into(),
+                )
+            }
+            Some(KeepSameAction::Run { yes }) => {
+                if !keep_same::load(root)?.on {
+                    return Err(
+                        CliError::new("off", EXIT_USAGE, "keeping iCloud and Google the same is off")
+                            .hint("turn it on with `cloud-contacts keep-same on`"),
+                    );
+                }
+                match engine.run(yes) {
+                    Ok(report) => {
+                        let summary = format!(
+                            "Made the same: {} changed, {} copied to Google, {} to iCloud, {} deleted",
+                            report.changed, report.copied_to_google, report.copied_to_icloud, report.deleted
+                        );
+                        status(Some(json!({ "report": report })), summary)
+                    }
+                    Err(e @ keep_same::RunError::Account(..)) => {
+                        let msg = e.to_string();
+                        if self.mode == Mode::Human {
+                            warning(&msg);
+                        }
+                        Ok(status(Some(json!({ "report": null })), msg.clone())?
+                            .meta("warnings", [msg])
+                            .exit(EXIT_UNAVAILABLE))
+                    }
+                    Err(e) => Err(run_failure(e)),
+                }
+            }
+            Some(KeepSameAction::Pair { icloud, google }) => {
+                self.decide(i, g, &icloud, &google, keep_same::Decision::Same)
+            }
+            Some(KeepSameAction::Apart { icloud, google }) => {
+                self.decide(i, g, &icloud, &google, keep_same::Decision::Different)
+            }
+        }
+    }
+
+    /// `pair` or `apart`: the person's call on two contacts, one in each
+    /// account (an ID with or without its account's prefix).
+    fn decide(
+        &self,
+        i: &crate::book::Account,
+        g: &crate::book::Account,
+        icloud: &str,
+        google: &str,
+        d: keep_same::Decision,
+    ) -> Outcome {
+        let local =
+            |id: &str, acc: &crate::book::Account| id.strip_prefix(&format!("{}:", acc.name)).unwrap_or(id).to_string();
+        let (li, lg) = (local(icloud, i), local(google, g));
+        keep_same::decide(&self.root, &li, &lg, d)?;
+        let what = match d {
+            keep_same::Decision::Same => "one person: linked, not copied",
+            keep_same::Decision::Different => "different people: each is copied to the other account",
+        };
+        let st = keep_same::load(&self.root)?;
+        Ok(Response::new(
+            keep_same::status_json(&st),
+            format!("{}:{li} and {}:{lg} are {what}", i.name, g.name),
+        ))
+    }
+
+    fn duplicates(&self) -> Outcome {
+        let shown = self.fresh(None)?;
+        let linked: std::collections::BTreeSet<(String, String)> = keep_same::load(&self.root)
+            .map(|s| {
+                s.links
+                    .into_iter()
+                    .flat_map(|l| [(l.icloud.clone(), l.google.clone()), (l.google, l.icloud)])
+                    .collect()
+            })
+            .unwrap_or_default();
+        let pairs = duplicate_pairs(&shown.entries, &linked);
+        let data: Vec<Value> = pairs
+            .iter()
+            .map(|(a, b, why)| {
+                json!({ "a": a.id(), "b": b.id(), "names": [a.contact.display_name(), b.contact.display_name()], "why": why })
+            })
+            .collect();
+        let human = if pairs.is_empty() {
+            "No likely duplicates.".to_string()
+        } else {
+            pairs
+                .iter()
+                .map(|(a, b, why)| {
+                    format!(
+                        "{} ({})  and  {} ({})\n  {}\n  merge: cloud-contacts merge {} {}",
+                        a.contact.display_name(),
+                        a.id(),
+                        b.contact.display_name(),
+                        b.id(),
+                        why.join(", "),
+                        a.id(),
+                        b.id()
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let n = pairs.len();
+        Ok(with_warnings(
+            Response::new(data, format!("{n} likely duplicate{}", if n == 1 { "" } else { "s" }))
+                .human(human)
+                .count(n),
+            &shown,
+            self.mode,
+        ))
+    }
+
+    fn merge(&self, a: &str, b: &str, keep: Option<&str>, yes: bool) -> Outcome {
+        let shown = self.fresh(None)?;
+        let (x, y) = (resolve(&shown, a)?.clone(), resolve(&shown, b)?.clone());
+        if x.id() == y.id() {
+            return Err(usage("merge needs two different contacts"));
+        }
+        let st = keep_same::load(&self.root).unwrap_or_default();
+        let ids = |e: &Entry| e.contact.id().to_string();
+        if st.on
+            && st
+                .links
+                .iter()
+                .any(|l| (l.icloud == ids(&x) && l.google == ids(&y)) || (l.icloud == ids(&y) && l.google == ids(&x)))
+        {
+            return Err(usage(
+                "these two are one contact kept the same in iCloud and Google; there is nothing to merge",
+            ));
+        }
+        let (kept, other) = match keep {
+            Some(acc) if y.account == acc && x.account != acc => (y, x),
+            Some(acc) if x.account != acc => {
+                return Err(usage(format!("neither contact is in {acc}")));
+            }
+            _ => (x, y),
+        };
+        let (sk, so) = (
+            keep_same::Shared::of(&kept.contact),
+            keep_same::Shared::of(&other.contact),
+        );
+        let (merged, _) = keep_same::merge(None, &sk, &so, keep_same::Later::ICloud);
+        let changes = sk.changes_to(&merged);
+        confirm(
+            self.mode,
+            "merge",
+            yes,
+            &format!(
+                "Merge {} ({}) into {} ({}), then delete {} from {}?",
+                other.contact.display_name(),
+                other.id(),
+                kept.contact.display_name(),
+                kept.id(),
+                other.id(),
+                other.label()
+            ),
+        )?;
+        let saved = if changes.is_empty() {
+            None
+        } else {
+            Some(self.book.update(&kept, &changes)?)
+        };
+        let warning_after = self.book.delete(&other)?;
+        let after = Entry {
+            contact: saved.map_or(kept.contact.clone(), |s| s.value),
+            ..kept
+        };
+        let mut data = json!({
+            "action": "merge",
+            "contact": contact_json(&after),
+            "deleted": { "id": other.id(), "name": other.contact.display_name() },
+        });
+        warn(&mut data, warning_after);
+        Ok(Response::new(
+            data,
+            format!(
+                "Merged {} into {}",
+                other.contact.display_name(),
+                after.contact.display_name()
+            ),
+        )
+        .ids(vec![after.id()]))
+    }
+
     fn account(&self, action: AccountAction) -> Outcome {
         match action {
             AccountAction::List => Ok(self.status()),
             AccountAction::Add { provider, name } => {
                 let (name, note) = accounts::add(name.as_deref(), &provider, &self.root)?;
+                let mut text = format!("Linked {name}: {note}");
+                // both kinds now: say how to keep them the same
+                let config = config::load()?;
+                let kinds: std::collections::BTreeSet<&str> =
+                    config.accounts.iter().map(|(n, c)| c.provider(n)).collect();
+                let off = !keep_same::load(&self.root).unwrap_or_default().on;
+                let hint = (kinds.contains("icloud") && kinds.contains("google") && off)
+                    .then_some("keep them the same with `cloud-contacts keep-same on`");
+                if let Some(h) = hint {
+                    text.push_str(&format!("\n{h}"));
+                }
                 Ok(Response::new(
-                    json!({ "account": name, "provider": provider, "note": note }),
+                    json!({ "account": name, "provider": provider, "note": note, "hint": hint }),
                     format!("Linked {name}: {note}"),
-                ))
+                )
+                .human(text))
             }
             AccountAction::Login { name } => {
                 let note = accounts::login(&name, &self.root)?;
@@ -738,6 +1092,108 @@ fn with_warnings(resp: Response, shown: &Shown, mode: Mode) -> Response {
         }
     }
     resp.meta("warnings", &shown.warnings)
+}
+
+/// keep-same's state in a line.
+fn keep_same_line(st: &keep_same::State) -> String {
+    match keep_same::shown(&[("icloud".into(), true), ("google".into(), true)], st, ago) {
+        keep_same::Shown::Switch { line, .. } => line,
+        keep_same::Shown::Nothing => String::new(),
+    }
+}
+
+fn waiting_lines(st: &keep_same::State) -> String {
+    st.waiting
+        .iter()
+        .map(|w| {
+            format!(
+                "\n  maybe one person: icloud:{} and google:{} ({})\n    `cloud-contacts keep-same pair icloud:{} google:{}`, or `apart`",
+                w.icloud, w.google, w.why, w.icloud, w.google
+            )
+        })
+        .collect()
+}
+
+/// "5 minutes ago" and the like, from seconds since the epoch.
+pub fn ago(t: u64) -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    match now.saturating_sub(t) {
+        0..60 => "just now".into(),
+        s @ 60..3600 => format!("{} min ago", s / 60),
+        s @ 3600..86_400 => format!("{} h ago", s / 3600),
+        s => format!("{} days ago", s / 86_400),
+    }
+}
+
+/// A run's failure as the contract's error.
+fn run_failure(e: keep_same::RunError) -> Failure {
+    match e {
+        keep_same::RunError::TooManyDeletions(list) => CliError::new("too_many_deletions", EXIT_USAGE, {
+            let names: Vec<String> = list.iter().take(20).map(|d| d.name.clone()).collect();
+            format!(
+                "this run would delete {} contacts ({}{}); nothing changed",
+                list.len(),
+                names.join(", "),
+                if list.len() > 20 { ", ..." } else { "" }
+            )
+        })
+        .hint("if those deletions are meant, confirm with `cloud-contacts keep-same run --yes`"),
+        keep_same::RunError::Account(_, e) => failure(&e),
+        keep_same::RunError::Other(e) => failure(&e),
+    }
+}
+
+/// Likely duplicates among `entries` (not pairs keep-same links): indexed
+/// by email, phone digits and name, so a large book is not compared pair by
+/// pair.
+fn duplicate_pairs<'e>(
+    entries: &'e [Entry],
+    linked: &std::collections::BTreeSet<(String, String)>,
+) -> Vec<(&'e Entry, &'e Entry, Vec<String>)> {
+    let mut index: std::collections::HashMap<String, Vec<usize>> = std::collections::HashMap::new();
+    for (n, e) in entries.iter().enumerate() {
+        let c = &e.contact;
+        let mut keys: Vec<String> = c
+            .values(Multi::Email)
+            .iter()
+            .map(|v| format!("e:{}", v.value.trim().to_lowercase()))
+            .collect();
+        keys.extend(c.values(Multi::Phone).iter().filter_map(|v| {
+            let d = model::digits(&v.value);
+            (d.len() >= 7).then(|| format!("p:{}", &d[d.len() - 7..]))
+        }));
+        if !c.person_name().is_empty() {
+            keys.push(format!("n:{}", model::fold(&c.display_name())));
+        }
+        keys.sort();
+        keys.dedup();
+        for k in keys {
+            index.entry(k).or_default().push(n);
+        }
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    let mut out = Vec::new();
+    for group in index.values() {
+        for (x, &a) in group.iter().enumerate() {
+            for &b in &group[x + 1..] {
+                if !seen.insert((a.min(b), a.max(b))) {
+                    continue;
+                }
+                let (ea, eb) = (&entries[a], &entries[b]);
+                if linked.contains(&(ea.contact.id().to_string(), eb.contact.id().to_string())) {
+                    continue;
+                }
+                let why = keep_same::evidence(&ea.contact, &eb.contact);
+                if !why.is_empty() {
+                    out.push((ea, eb, why));
+                }
+            }
+        }
+    }
+    out.sort_by_key(|(a, b, _)| (a.contact.sort_key(), b.contact.sort_key()));
+    out
 }
 
 /// What `add` and `edit` answer: the contact as saved.

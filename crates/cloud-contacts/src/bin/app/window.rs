@@ -21,6 +21,7 @@ use cloud_contacts::config;
 use cloud_contacts::draft::{Draft, Row, SCALARS, typed};
 use cloud_contacts::error::Error;
 use cloud_contacts::icloud::api::SessionTransport;
+use cloud_contacts::keep_same;
 use cloud_contacts::model::{self, Field, Multi};
 use cloud_contacts::store::Store;
 use icloud_app_ui::{SignInBanner, background};
@@ -54,6 +55,13 @@ pub struct Window {
     visible: RefCell<Option<HashSet<String>>>,
     syncing: Cell<bool>,
     last_error: RefCell<Option<String>>,
+    /// Keeping iCloud and Google the same: the offer above the contacts,
+    /// and the switch with its status line below the sidebar. Neither shows
+    /// without both an iCloud and a Google account.
+    ks_offer: gtk::Revealer,
+    ks_row: adw::SwitchRow,
+    /// Set while the switch is moved by the window, not the person.
+    ks_quiet: Cell<bool>,
 }
 
 impl Window {
@@ -185,6 +193,36 @@ impl Window {
                 this.confirm_delete(c);
             }
         });
+        action("keep-same-review", |this| this.keep_same_review());
+        action("keep-same-not-now", |this| {
+            let root = this.root.clone();
+            this.ks_offer.set_reveal_child(false);
+            background(
+                move || {
+                    root.map(|r| {
+                        keep_same::update(&r, |s| {
+                            s.offer_declined = true;
+                            Ok(())
+                        })
+                    })
+                },
+                |_| {},
+            );
+        });
+        let weak = Rc::downgrade(self);
+        self.ks_row.connect_active_notify(move |row| {
+            let Some(this) = weak.upgrade() else { return };
+            if this.ks_quiet.get() {
+                return;
+            }
+            if row.is_active() {
+                // on only through the review; the switch shows the outcome
+                this.set_switch(false);
+                this.keep_same_review();
+            } else {
+                this.keep_same_off();
+            }
+        });
         action("add-icloud", |this| this.link("icloud"));
         action("add-google", |this| this.link("google"));
         let a = gio::SimpleAction::new("relogin", Some(glib::VariantTy::STRING));
@@ -310,6 +348,10 @@ impl Window {
                 match result {
                     Ok(Ok((name, _))) => {
                         this.toast(&format!("Linked {}", account_title(&name, provider)));
+                        let other = if provider == "google" { "icloud" } else { "google" };
+                        if this.accounts.borrow().iter().any(|(_, p)| p == other) {
+                            this.offer_after_link();
+                        }
                         this.sync();
                     }
                     Ok(Err(e)) => this.toast(&e.to_string()),
@@ -406,6 +448,7 @@ impl Window {
                         }
                         this.set_accounts(accounts);
                         this.show_warnings(&shown);
+                        this.show_keep_same();
                         // Most fetches change nothing: the rows stay.
                         let changed = *this.shown.borrow() != shown;
                         *this.shown.borrow_mut() = shown;
@@ -473,6 +516,7 @@ impl Window {
                         }
                         done(&this, out);
                         this.show_list();
+                        this.keep_same_run();
                         return;
                     }
                     Ok(Err(e)) if e.is_icloud_sign_in() => {
@@ -486,6 +530,254 @@ impl Window {
                     this.toast(&problem);
                 }
                 failed(&this);
+            },
+        );
+    }
+
+    /// Moves the switch without taking it for the person's move.
+    fn set_switch(&self, on: bool) {
+        self.ks_quiet.set(true);
+        self.ks_row.set_active(on);
+        self.ks_quiet.set(false);
+    }
+
+    /// Shows keep-same's offer, switch and status line as the linked
+    /// accounts and its state say (`keep_same::shown`).
+    fn show_keep_same(self: &Rc<Self>) {
+        let root = self.root.clone();
+        let weak = Rc::downgrade(self);
+        background(
+            move || {
+                let root = root?;
+                let config = config::load().ok()?;
+                let accounts: Vec<(String, bool)> = accounts::statuses(&config, &root)
+                    .into_iter()
+                    .map(|a| (a.provider, a.signed_in))
+                    .collect();
+                let st = keep_same::load(&root).unwrap_or_default();
+                Some(keep_same::shown(&accounts, &st, cloud_contacts::cli::ago))
+            },
+            move |result| {
+                let Some(this) = weak.upgrade() else { return };
+                match result.ok().flatten() {
+                    Some(keep_same::Shown::Switch { on, line, offer }) => {
+                        this.ks_row.set_visible(true);
+                        this.set_switch(on);
+                        this.ks_row.set_subtitle(&line);
+                        this.ks_offer.set_reveal_child(offer);
+                    }
+                    _ => {
+                        this.ks_row.set_visible(false);
+                        this.ks_offer.set_reveal_child(false);
+                    }
+                }
+            },
+        );
+    }
+
+    /// Right after the second kind of account is linked.
+    fn offer_after_link(self: &Rc<Self>) {
+        let dialog = adw::AlertDialog::new(
+            Some("Keep iCloud and Google Contacts the Same?"),
+            Some(
+                "A contact added, changed or deleted in one would be in the other too. You can turn this on later below the contacts.",
+            ),
+        );
+        dialog.add_responses(&[("later", "_Not Now"), ("on", "_Turn On…")]);
+        dialog.set_response_appearance("on", adw::ResponseAppearance::Suggested);
+        dialog.set_default_response(Some("on"));
+        dialog.set_close_response("later");
+        let weak = Rc::downgrade(self);
+        dialog.connect_response(Some("on"), move |_, _| {
+            if let Some(this) = weak.upgrade() {
+                this.keep_same_review();
+            }
+        });
+        dialog.present(Some(&self.window));
+    }
+
+    /// The two accounts' providers, opened, for the engine.
+    fn pair_book(root: Option<PathBuf>, t: Arc<SessionTransport>) -> cloud_contacts::error::Result<(PathBuf, Book)> {
+        let root = root.ok_or_else(|| Error::Other("no data directory ($HOME is not set)".into()))?;
+        let book = open(&config::load()?, Some(root.clone()), t)?;
+        Ok((root, book))
+    }
+
+    /// Turn On…: what turning on would do, with the doubtful pairs for the
+    /// person to call, then on.
+    fn keep_same_review(self: &Rc<Self>) {
+        let (t, root) = (self.transport.clone(), self.root.clone());
+        let weak = Rc::downgrade(self);
+        self.toast("Looking at both accounts…");
+        background(
+            move || -> Result<(keep_same::Plan, Vec<(String, String)>), String> {
+                let (root, book) = Self::pair_book(root, t).map_err(|e| e.to_string())?;
+                let keep_same::Pairing::Ready(i, g) = keep_same::pairing_of(&book) else {
+                    return Err("keeping contacts the same needs an iCloud and a Google account".into());
+                };
+                let engine = keep_same::Engine::new(&root, &*i.provider_impl, &*g.provider_impl);
+                let plan = engine.plan().map_err(|e| e.to_string())?;
+                // names for the doubtful pairs
+                let shown = book.read(None, true).map_err(|e| e.to_string())?;
+                let name = |acc: &str, id: &str| {
+                    shown
+                        .get(&format!("{acc}:{id}"))
+                        .map(|e| e.contact.display_name())
+                        .unwrap_or_else(|| id.to_string())
+                };
+                let names = plan
+                    .doubtful
+                    .iter()
+                    .map(|p| (name(&i.name, &p.icloud), name(&g.name, &p.google)))
+                    .collect();
+                Ok((plan, names))
+            },
+            move |result| {
+                let Some(this) = weak.upgrade() else { return };
+                match result {
+                    Ok(Ok((plan, names))) => this.review_dialog(plan, names),
+                    Ok(Err(e)) | Err(e) => this.toast(&e),
+                }
+            },
+        );
+    }
+
+    fn review_dialog(self: &Rc<Self>, plan: keep_same::Plan, names: Vec<(String, String)>) {
+        let body = gtk::Box::new(gtk::Orientation::Vertical, 12);
+        let summary = format!(
+            "{} contacts in both accounts will be joined. {} will be copied to Google and {} to iCloud. From then on, a contact added, changed or deleted in one is in the other too, while this computer is on. Photos and Google's groups stay where they are.",
+            plan.pairs.len(),
+            plan.to_google,
+            plan.to_icloud
+        );
+        body.append(&gtk::Label::builder().label(&summary).wrap(true).xalign(0.0).build());
+        let mut choices = Vec::new();
+        if !plan.doubtful.is_empty() {
+            body.append(
+                &gtk::Label::builder()
+                    .label("These may be one person. Neither is copied until you decide:")
+                    .wrap(true)
+                    .xalign(0.0)
+                    .css_classes(["heading"])
+                    .build(),
+            );
+            let list = gtk::ListBox::builder()
+                .selection_mode(gtk::SelectionMode::None)
+                .css_classes(["boxed-list"])
+                .build();
+            let options = gtk::StringList::new(&["Decide Later", "Same Person", "Different People"]);
+            for (p, (i, g)) in plan.doubtful.iter().zip(&names) {
+                let row = adw::ComboRow::builder()
+                    .title(format!("{i} (iCloud) · {g} (Google)"))
+                    .subtitle(&p.why)
+                    .model(&options)
+                    .build();
+                list.append(&row);
+                choices.push((p.clone(), row));
+            }
+            body.append(
+                &gtk::ScrolledWindow::builder()
+                    .child(&list)
+                    .propagate_natural_height(true)
+                    .max_content_height(320)
+                    .hscrollbar_policy(gtk::PolicyType::Never)
+                    .build(),
+            );
+        }
+        let dialog = adw::AlertDialog::new(Some("Keep iCloud and Google Contacts the Same"), None);
+        dialog.set_extra_child(Some(&body));
+        dialog.add_responses(&[("cancel", "_Cancel"), ("on", "_Turn On")]);
+        dialog.set_response_appearance("on", adw::ResponseAppearance::Suggested);
+        dialog.set_default_response(Some("on"));
+        dialog.set_close_response("cancel");
+        let weak = Rc::downgrade(self);
+        dialog.connect_response(Some("on"), move |_, _| {
+            let Some(this) = weak.upgrade() else { return };
+            let decisions: Vec<(String, String, keep_same::Decision)> = choices
+                .iter()
+                .filter_map(|(p, row)| {
+                    let d = match row.selected() {
+                        1 => keep_same::Decision::Same,
+                        2 => keep_same::Decision::Different,
+                        _ => return None,
+                    };
+                    Some((p.icloud.clone(), p.google.clone(), d))
+                })
+                .collect();
+            let (t, root, plan) = (this.transport.clone(), this.root.clone(), plan.clone());
+            let weak = Rc::downgrade(&this);
+            background(
+                move || -> Result<String, String> {
+                    let (root, book) = Self::pair_book(root, t).map_err(|e| e.to_string())?;
+                    keep_same::turn_on(&root, &plan, &decisions).map_err(|e| e.to_string())?;
+                    let warning = keep_same::timer(true);
+                    let keep_same::Pairing::Ready(i, g) = keep_same::pairing_of(&book) else {
+                        return Err("an account went away".into());
+                    };
+                    let mut engine = keep_same::Engine::new(&root, &*i.provider_impl, &*g.provider_impl);
+                    let done = match engine.run(false) {
+                        Ok(_) => "iCloud and Google contacts are kept the same now".to_string(),
+                        Err(e) => e.to_string(),
+                    };
+                    Ok(warning.map_or(done.clone(), |w| format!("{done} ({w})")))
+                },
+                move |result| {
+                    let Some(this) = weak.upgrade() else { return };
+                    match result {
+                        Ok(Ok(note)) => this.toast(&note),
+                        Ok(Err(e)) | Err(e) => this.toast(&e),
+                    }
+                    this.sync();
+                },
+            );
+        });
+        dialog.present(Some(&self.window));
+    }
+
+    fn keep_same_off(self: &Rc<Self>) {
+        let root = self.root.clone();
+        let weak = Rc::downgrade(self);
+        background(
+            move || -> Option<String> {
+                let root = root?;
+                keep_same::turn_off(&root).ok()?;
+                Some(
+                    keep_same::timer(false)
+                        .unwrap_or_else(|| "Turned off: both accounts keep their contacts as they are".into()),
+                )
+            },
+            move |result| {
+                let Some(this) = weak.upgrade() else { return };
+                if let Ok(Some(note)) = result {
+                    this.toast(&note);
+                }
+                this.show_keep_same();
+            },
+        );
+    }
+
+    /// A run now (after a change made here), when it is on.
+    fn keep_same_run(self: &Rc<Self>) {
+        let (t, root) = (self.transport.clone(), self.root.clone());
+        let weak = Rc::downgrade(self);
+        background(
+            move || {
+                let (root, book) = Self::pair_book(root, t).ok()?;
+                if !keep_same::load(&root).ok()?.on {
+                    return None;
+                }
+                let keep_same::Pairing::Ready(i, g) = keep_same::pairing_of(&book) else {
+                    return None;
+                };
+                let mut engine = keep_same::Engine::new(&root, &*i.provider_impl, &*g.provider_impl);
+                Some(engine.run(false).map(drop).map_err(|e| e.to_string()))
+            },
+            move |result| {
+                let Some(this) = weak.upgrade() else { return };
+                if let Ok(Some(Err(e))) = result {
+                    this.error(&e);
+                }
+                this.show_keep_same();
             },
         );
     }
@@ -1043,6 +1335,25 @@ fn build(app: &adw::Application, banner: SignInBanner) -> Window {
     sidebar_body.append(&filter);
     sidebar_body.append(&search);
     sidebar_body.append(&gtk::ScrolledWindow::builder().child(&list).vexpand(true).build());
+    let ks_row = adw::SwitchRow::builder()
+        .title("Keep iCloud and Google contacts the same")
+        .subtitle("Off")
+        .visible(false)
+        .build();
+    let ks_list = gtk::ListBox::builder()
+        .selection_mode(gtk::SelectionMode::None)
+        .css_classes(["boxed-list"])
+        .margin_start(8)
+        .margin_end(8)
+        .margin_top(6)
+        .margin_bottom(8)
+        .build();
+    ks_list.append(&ks_row);
+    ks_row
+        .bind_property("visible", &ks_list, "visible")
+        .sync_create()
+        .build();
+    sidebar_body.append(&ks_list);
     let sidebar_tv = adw::ToolbarView::new();
     sidebar_tv.add_top_bar(&sidebar_header);
     sidebar_tv.set_content(Some(&sidebar_body));
@@ -1102,6 +1413,40 @@ fn build(app: &adw::Application, banner: SignInBanner) -> Window {
         .build();
     let body = gtk::Box::new(gtk::Orientation::Vertical, 0);
     body.append(&banner.widget);
+    let offer = gtk::Box::builder()
+        .spacing(12)
+        .margin_start(12)
+        .margin_end(12)
+        .margin_top(6)
+        .margin_bottom(6)
+        .build();
+    offer.append(
+        &gtk::Label::builder()
+            .label("Your iCloud and Google contacts are separate. Keep them the same?")
+            .hexpand(true)
+            .xalign(0.0)
+            .wrap(true)
+            .build(),
+    );
+    offer.append(
+        &gtk::Button::builder()
+            .label("Not Now")
+            .action_name("win.keep-same-not-now")
+            .build(),
+    );
+    offer.append(
+        &gtk::Button::builder()
+            .label("Turn On…")
+            .action_name("win.keep-same-review")
+            .css_classes(["suggested-action"])
+            .build(),
+    );
+    let ks_offer = gtk::Revealer::builder()
+        .child(&offer)
+        .reveal_child(false)
+        .css_classes(["toolbar"])
+        .build();
+    body.append(&ks_offer);
     split.set_vexpand(true);
     body.append(&split);
     // With no account linked: a page that links one.
@@ -1175,6 +1520,9 @@ fn build(app: &adw::Application, banner: SignInBanner) -> Window {
         visible: RefCell::default(),
         syncing: Cell::new(false),
         last_error: RefCell::default(),
+        ks_offer,
+        ks_row,
+        ks_quiet: Cell::new(false),
     }
 }
 

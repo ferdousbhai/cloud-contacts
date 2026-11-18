@@ -20,14 +20,14 @@ use serde_json::{Map, Value, json};
 pub struct Contact(pub Map<String, Value>);
 
 /// A phone, email or URL with its label.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Labeled {
     /// As iCloud stores it: `MOBILE`, `HOME`, `WORK`, ... or a custom one.
     pub label: String,
     pub value: String,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Address {
     pub label: String,
     pub street: String,
@@ -44,6 +44,8 @@ pub enum Field {
     First,
     Middle,
     Last,
+    Prefix,
+    Suffix,
     Nickname,
     Company,
     JobTitle,
@@ -58,6 +60,8 @@ impl Field {
             Field::First => "firstName",
             Field::Middle => "middleName",
             Field::Last => "lastName",
+            Field::Prefix => "prefix",
+            Field::Suffix => "suffix",
             Field::Nickname => "nickName",
             Field::Company => "companyName",
             Field::JobTitle => "jobTitle",
@@ -139,6 +143,9 @@ pub enum Change {
     /// the entries stored exactly so (0: the first); when fewer are left
     /// (another device removed some meanwhile), the last of them goes.
     RemoveExact(Multi, Labeled, usize),
+    /// Make the street addresses these, in this order: an address the card
+    /// already has (label and every part the same) keeps its entry whole.
+    Addresses(Vec<Address>),
 }
 
 impl Change {
@@ -147,7 +154,7 @@ impl Change {
         match self {
             Change::Remove(m, v) => m.matches(&e.value, v),
             Change::RemoveExact(_, l, _) => e == l,
-            Change::Set(..) | Change::Add(..) => false,
+            Change::Set(..) | Change::Add(..) | Change::Addresses(..) => false,
         }
     }
 }
@@ -264,6 +271,43 @@ fn str_of<'a>(m: &'a Map<String, Value>, k: &str) -> &'a str {
     m.get(k).and_then(Value::as_str).unwrap_or("")
 }
 
+/// One `streetAddresses` entry.
+fn address_of(e: &Value) -> Option<Address> {
+    let f = e["field"].as_object()?;
+    Some(Address {
+        label: e["label"].as_str().unwrap_or("").to_owned(),
+        street: str_of(f, "street").to_owned(),
+        city: str_of(f, "city").to_owned(),
+        state: str_of(f, "state").to_owned(),
+        postal_code: str_of(f, "postalCode").to_owned(),
+        country: str_of(f, "country").to_owned(),
+        country_code: str_of(f, "countryCode").to_owned(),
+    })
+}
+
+/// A `streetAddresses` entry for `a`: only the parts it has.
+fn address_entry(a: &Address) -> Value {
+    let mut f = Map::new();
+    for (k, v) in [
+        ("street", &a.street),
+        ("city", &a.city),
+        ("state", &a.state),
+        ("postalCode", &a.postal_code),
+        ("country", &a.country),
+        ("countryCode", &a.country_code),
+    ] {
+        if !v.is_empty() {
+            f.insert(k.into(), json!(v));
+        }
+    }
+    let mut e = Map::new();
+    if !a.label.is_empty() {
+        e.insert("label".into(), json!(a.label));
+    }
+    e.insert("field".into(), Value::Object(f));
+    Value::Object(e)
+}
+
 impl Contact {
     /// A new card with a fresh `contactId` (an uppercase UUID, as Apple's).
     /// `is_company` shows it by its company name.
@@ -374,18 +418,7 @@ impl Contact {
             .and_then(Value::as_array)
             .into_iter()
             .flatten()
-            .filter_map(|e| {
-                let f = e["field"].as_object()?;
-                Some(Address {
-                    label: e["label"].as_str().unwrap_or("").to_owned(),
-                    street: str_of(f, "street").to_owned(),
-                    city: str_of(f, "city").to_owned(),
-                    state: str_of(f, "state").to_owned(),
-                    postal_code: str_of(f, "postalCode").to_owned(),
-                    country: str_of(f, "country").to_owned(),
-                    country_code: str_of(f, "countryCode").to_owned(),
-                })
-            })
+            .filter_map(address_of)
             .collect()
     }
 
@@ -432,7 +465,30 @@ impl Contact {
                         self.0.insert(f.key().into(), json!(v));
                     }
                 }
-                Change::Add(..) | Change::Remove(..) | Change::RemoveExact(..) if self.has(c) => {}
+                Change::Add(..) | Change::Remove(..) | Change::RemoveExact(..) | Change::Addresses(..)
+                    if self.has(c) => {}
+                Change::Addresses(list) => {
+                    let old: Vec<Value> = self
+                        .0
+                        .get("streetAddresses")
+                        .and_then(Value::as_array)
+                        .cloned()
+                        .unwrap_or_default();
+                    let mut unused: Vec<(Address, Value)> =
+                        old.into_iter().filter_map(|e| Some((address_of(&e)?, e))).collect();
+                    let entries: Vec<Value> = list
+                        .iter()
+                        .map(|a| match unused.iter().position(|(o, _)| o == a) {
+                            Some(i) => unused.remove(i).1,
+                            None => address_entry(a),
+                        })
+                        .collect();
+                    if entries.is_empty() {
+                        self.0.remove("streetAddresses");
+                    } else {
+                        self.0.insert("streetAddresses".into(), Value::Array(entries));
+                    }
+                }
                 Change::Add(m, l) => {
                     let list = self.0.entry(m.key()).or_insert(Value::Null);
                     if !list.is_array() {
@@ -477,6 +533,7 @@ impl Contact {
                 .iter()
                 .any(|e| m.matches(&e.value, &l.value) && e.label == l.label),
             Change::Remove(m, _) | Change::RemoveExact(m, ..) => !self.values(*m).iter().any(|e| change.removes(e)),
+            Change::Addresses(list) => self.addresses() == *list,
         }
     }
 }

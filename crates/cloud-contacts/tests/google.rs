@@ -53,6 +53,7 @@ fn start() -> Env {
     env.ok(&["status"]);
     let added = env.json(&["account", "add", "google"]);
     assert_eq!(added["account"], "google");
+    assert_eq!(added["hint"], "keep them the same with `cloud-contacts keep-same on`");
     env
 }
 
@@ -81,6 +82,7 @@ impl Env {
             )
             .env("FAKE_GWS_STATE", gws_state(self.dir.path()))
             .env("CLOUD_CONTACTS_BROWSER", "true")
+            .env("CLOUD_CONTACTS_SYSTEMCTL", "true")
             .env("FAKE_CONTACTS_QUIET", "1")
             .args(args);
         for (k, v) in env {
@@ -308,4 +310,125 @@ fn unlinking_google_forgets_its_sign_in_not_its_contacts() {
     // A second iCloud account cannot be linked: icloud-session holds one.
     let (exit, e) = env.fails(&["account", "add", "icloud", "--name", "other"]);
     assert_eq!((exit, e["code"].as_str()), (3, Some("not_configured")));
+}
+
+#[test]
+fn keep_same_needs_both_accounts() {
+    let env = start();
+    env.ok(&["account", "remove", "google", "--yes"]);
+    let (exit, e) = env.fails(&["keep-same"]);
+    assert_eq!((exit, e["code"].as_str()), (3, Some("needs_both_accounts")));
+    assert_eq!(
+        e["message"],
+        "keeping contacts the same needs an iCloud and a Google account"
+    );
+    assert_eq!(
+        e["hint"],
+        "link the Google one with `cloud-contacts account add google`"
+    );
+    assert!(env.json(&["status"]).get("keep_same").is_none());
+    let help = String::from_utf8_lossy(&env.run(&["--help"]).stdout).into_owned();
+    assert!(
+        help.contains("keep-same") && help.contains("(needs an iCloud and a Google account)"),
+        "{help}"
+    );
+}
+
+#[test]
+fn keep_same_on_copies_both_ways_and_holds_doubts() {
+    let env = start();
+    let st = env.json(&["keep-same"]);
+    assert_eq!((st["on"].as_bool(), st["linked"].as_u64()), (Some(false), Some(0)));
+    assert_eq!(env.json(&["status"])["keep_same"]["on"], false);
+    // it asks first
+    let (exit, e) = env.fails(&["keep-same", "on"]);
+    assert_eq!((exit, e["code"].as_str()), (2, Some("usage")));
+    assert!(env.google()["people"].as_object().unwrap().len() == 2, "nothing copied");
+
+    let on = env.json(&["keep-same", "on", "--yes"]);
+    assert_eq!(on["on"], true);
+    // the two Ann Lees share only a name: they wait for the person
+    assert_eq!(on["plan"]["doubtful"].as_array().unwrap().len(), 1);
+    assert_eq!(on["waiting"][0]["why"], "name Ann Lee");
+    assert_eq!(on["report"]["copied_to_google"], 3);
+    assert_eq!(on["report"]["copied_to_icloud"], 1);
+    let people = env.google()["people"].clone();
+    let firsts: Vec<&str> = people
+        .as_object()
+        .unwrap()
+        .values()
+        .filter_map(|p| p["names"][0]["givenName"].as_str())
+        .collect();
+    assert!(firsts.contains(&"Bob") && firsts.contains(&"Mock"), "{firsts:?}");
+    let gus: Vec<_> = env
+        .icloud
+        .requests()
+        .into_iter()
+        .filter(|r| r["path"] == "/co/contacts/card/" && r["body"]["contacts"][0]["firstName"] == "Gus")
+        .collect();
+    assert_eq!(gus.len(), 1, "Gus copied to iCloud once");
+
+    // an edit in Google crosses on the next run
+    env.ok(&["edit", "google:people/c1", "--job-title", "Pilot"]);
+    let run = env.json(&["keep-same", "run"]);
+    assert_eq!(run["report"]["changed"], 1);
+    let gus_icloud = env.json(&["list", "Gus", "--account", "icloud", "--cached"]);
+    assert_eq!(gus_icloud[0]["job_title"], "Pilot");
+
+    // the doubtful pair called one person: linked, not copied
+    let waiting = env.json(&["keep-same"])["waiting"][0].clone();
+    let i = format!("icloud:{}", waiting["icloud"].as_str().unwrap());
+    let g = format!("google:{}", waiting["google"].as_str().unwrap());
+    let st = env.json(&["keep-same", "pair", &i, &g]);
+    assert_eq!(st["waiting"], json!([]));
+    env.ok(&["keep-same", "run"]);
+    let anns = env.json(&["list", "ann lee", "--cached"]);
+    assert_eq!(anns.as_array().unwrap().len(), 2, "one in each account");
+    assert_eq!(anns[0]["company"], anns[1]["company"]);
+
+    // unlinking Google turns it off and says so
+    let out = env.json(&["account", "remove", "google", "--yes"]);
+    assert!(
+        out["note"]
+            .as_str()
+            .unwrap()
+            .contains("keeping iCloud and Google contacts the same is off now"),
+        "{out}"
+    );
+}
+
+#[test]
+fn duplicates_and_merge() {
+    let env = start();
+    let dups = env.json(&["duplicates"]);
+    let ann = dups
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["names"][0] == "Ann Lee")
+        .expect("the two Ann Lees");
+    assert_eq!(ann["why"], json!(["name Ann Lee"]));
+    // merge into the iCloud one: Google's company is not taken over iCloud's,
+    // and the Google copy goes
+    let (exit, _) = env.fails(&["merge", "icloud:ANN-LEE", "google:people/c2"]);
+    assert_eq!(exit, 2, "asks first");
+    let out = env.json(&[
+        "merge",
+        "google:people/c2",
+        "icloud:ANN-LEE",
+        "--keep",
+        "icloud",
+        "--yes",
+    ]);
+    assert_eq!(out["contact"]["id"], "icloud:ANN-LEE");
+    assert_eq!(out["contact"]["company"], "Acme");
+    assert_eq!(out["deleted"]["id"], "google:people/c2");
+    assert!(env.google()["people"].get("people/c2").is_none());
+    assert!(
+        env.json(&["duplicates"])
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|d| d["names"][0] != "Ann Lee")
+    );
 }

@@ -16,6 +16,7 @@ pub mod draft;
 pub mod error;
 pub mod google;
 pub mod icloud;
+pub mod keep_same;
 pub mod model;
 pub mod store;
 pub mod vcard;

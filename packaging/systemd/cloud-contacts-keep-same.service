@@ -1,0 +1,12 @@
+[Unit]
+Description=Keep iCloud and Google contacts the same (cloud-contacts keep-same run)
+Documentation=https://github.com/ferdousbhai/cloud-contacts#keeping-icloud-and-google-the-same
+
+[Service]
+Type=oneshot
+# Fetches both accounts and makes them the same. Changes nothing when either
+# can't be read, or when it would delete more than it does without asking
+# (`cloud-contacts keep-same` says why).
+ExecStart=/usr/bin/cloud-contacts keep-same run --quiet
+TimeoutStartSec=10min
+Nice=10
