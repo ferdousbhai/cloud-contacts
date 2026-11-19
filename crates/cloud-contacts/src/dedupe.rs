@@ -7,14 +7,15 @@
 //! punctuation, spaces and accents aside: `Cold Room` is `Coldroom`). A
 //! pair found is *likely* or *check*:
 //!
-//! - likely: a shared phone or email and the same name, or one name inside
-//!   the other (`Marco` in `Marco Gomez`); or the same full name of two
-//!   parts or more (or the same company) with nothing against it (no
-//!   different birthdays, no phones of both that differ, no emails of both
-//!   that differ);
-//! - check: a shared phone or email and different names; the same
-//!   one-word name and no shared phone or email; the same full name with
-//!   something against it.
+//! - likely: a shared phone or email, whatever the names (one number is one
+//!   person; the name not kept becomes the nickname), unless a name is of
+//!   two people (`Rumpa & Joel` and `Rumpa`: the couple's card and hers);
+//!   or the same full name of two parts or more
+//!   (or the same company), even with other numbers (a new number, a second
+//!   one: merging keeps both), unless their birthdays differ;
+//! - check: a shared phone or email on a card of two people; the same
+//!   one-word name and no shared phone or email (first names are common);
+//!   the same full name and different birthdays.
 //!
 //! One name inside another (`Jack` and `Jack (Club)`) with nothing shared
 //! is no reason at all: first names are common.
@@ -154,19 +155,6 @@ fn shared_values(a: &Contact, b: &Contact) -> Vec<String> {
     why
 }
 
-/// Both have one of these and none in common.
-fn differ(a: &Contact, b: &Contact, m: Multi) -> bool {
-    let (va, vb) = (a.values(m), b.values(m));
-    !va.is_empty()
-        && !vb.is_empty()
-        && !va.iter().any(|x| {
-            vb.iter().any(|y| match m {
-                Multi::Phone => model::same_number(&x.value, &y.value),
-                _ => x.value.trim().eq_ignore_ascii_case(y.value.trim()),
-            })
-        })
-}
-
 /// One name inside the other, as words in order (`Marco` in
 /// `Marco Gomez`), or as letters (`StPierre` in `Brandon St. Pierre`).
 fn name_within(a: &str, b: &str) -> bool {
@@ -186,22 +174,20 @@ pub fn edge(a: &Contact, b: &Contact) -> Option<(Confidence, Vec<String>)> {
     let (na, nb) = (name_of(a), name_of(b));
     let same_name = !compact(&na).is_empty() && compact(&na) == compact(&nb);
     let shared = shared_values(a, b);
-    let within = name_within(&na, &nb);
-    let conflict = differ(a, b, Multi::Phone)
-        || differ(a, b, Multi::Email)
-        || (!a.field(Field::Birthday).is_empty()
-            && !b.field(Field::Birthday).is_empty()
-            && a.field(Field::Birthday) != b.field(Field::Birthday));
+    let other_birthday = !a.field(Field::Birthday).is_empty()
+        && !b.field(Field::Birthday).is_empty()
+        && a.field(Field::Birthday) != b.field(Field::Birthday);
     // either way round: `Cold Room` and `Coldroom` are one full name
     let full_name = words(&na).len().max(words(&nb).len()) >= 2 || (a.is_company() && b.is_company());
     let mut why = shared.clone();
     if same_name {
         why.push(format!("name {}", na.trim()));
-    } else if within && !shared.is_empty() {
+    } else if !shared.is_empty() {
         why.push(format!("names {} and {}", na.trim(), nb.trim()));
     }
     if !shared.is_empty() {
-        let conf = if same_name || within {
+        // one number is one person, unless the card is of two
+        let conf = if same_name || !(of_two(&na) || of_two(&nb)) {
             Confidence::Likely
         } else {
             Confidence::Check
@@ -213,13 +199,19 @@ pub fn edge(a: &Contact, b: &Contact) -> Option<(Confidence, Vec<String>)> {
         return None;
     }
     Some((
-        if full_name && !conflict {
+        if full_name && !other_birthday {
             Confidence::Likely
         } else {
             Confidence::Check
         },
         why,
     ))
+}
+
+/// A name of two people (`Rumpa & Joel`, `Ana and Luis`, `Mum + Dad`): a
+/// number they share is not one person's.
+fn of_two(name: &str) -> bool {
+    name.contains('&') || name.contains('+') || words(name).iter().any(|w| w == "and")
 }
 
 /// The keys a card is looked up by, so a large book is not compared pair by
@@ -927,7 +919,7 @@ mod tests {
                 phone("555 030 0001"),
                 email("lee@example.com"),
             ]),
-            card(&[first("Toronto"), last("Office"), email("lee@example.com")]),
+            card(&[first("Lee & Kim"), email("lee@example.com")]),
         ]);
         let (groups, _) = find(&e, &Apart::default(), &BTreeSet::new());
         assert_eq!(groups.len(), 2, "{groups:?}");
@@ -953,15 +945,38 @@ mod tests {
     }
 
     #[test]
-    fn the_same_full_name_with_different_numbers_is_a_check() {
+    fn the_same_full_name_with_different_numbers_is_likely_unless_birthdays_differ() {
         let e = entries(vec![
             card(&[first("Sam"), last("Lee"), phone("+1 555 010 0001")]),
             card(&[first("Sam"), last("Lee"), phone("+1 555 010 0002")]),
         ]);
         assert_eq!(
             find(&e, &Apart::default(), &BTreeSet::new()).0[0].confidence,
-            Confidence::Check
+            Confidence::Likely
         );
+        let one = card(&[first("Sam"), last("Lee"), field(Field::Birthday, "1980-01-01")]);
+        let two = card(&[first("Sam"), last("Lee"), field(Field::Birthday, "1991-05-05")]);
+        assert_eq!(edge(&one, &two).unwrap().0, Confidence::Check);
+    }
+
+    #[test]
+    fn one_number_is_one_person_unless_the_card_is_of_two() {
+        let a = card(&[first("Sophie"), last("Maffolini"), phone("+62 811 000 111")]);
+        let b = card(&[first("Sophie"), last("MD"), phone("0811 000 111")]);
+        assert_eq!(edge(&a, &b).unwrap().0, Confidence::Likely);
+        let c = card(&[first("Rumpa & Joel"), phone("+62 811 000 222")]);
+        let d = card(&[first("Rumpa"), last("apu"), phone("+62 811 000 222")]);
+        assert_eq!(edge(&c, &d).unwrap().0, Confidence::Check, "a couple's card and hers");
+        let e = card(&[first("Ana"), last("and Luis"), phone("+62 811 000 333")]);
+        let f = card(&[first("Luisa"), phone("+62 811 000 333")]);
+        assert_eq!(edge(&e, &f).unwrap().0, Confidence::Check);
+    }
+
+    #[test]
+    fn the_same_first_name_alone_with_other_numbers_is_a_check() {
+        let a = card(&[first("Eric"), phone("+1 555 010 0001")]);
+        let b = card(&[first("Eric"), phone("+1 555 010 0002")]);
+        assert_eq!(edge(&a, &b).unwrap().0, Confidence::Check);
     }
 
     struct Fake {

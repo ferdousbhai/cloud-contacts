@@ -85,13 +85,14 @@ Cloud Contacts finds contacts that may be one person and merges them for you, lo
 The window says how many look like duplicates, above the contacts; Review… (or Duplicates… in
 the main menu, beside Refresh) shows them:
 
-- **Likely the same**: a shared phone or email and the same name, or one name inside the other
-  (Marco and Marco Gomez); or the same full name with nothing against it (case, punctuation,
-  spaces and accents aside). Merge All merges them, each group into one card.
-- **Check these**, a pair at a time: different names sharing a phone or email, the same
-  one-word name with different numbers, or the same full name with different numbers. Merge,
-  or Keep Apart (they are not shown again). A first name inside a fuller one with nothing in
-  common (Jack and Jack (Club)) is not a duplicate.
+- **Likely the same**: a shared phone or email, whatever the names (one number is one person;
+  the name not kept becomes the nickname, so search finds either); or the same full name or
+  company (case, punctuation, spaces and accents aside), even with other numbers: merging
+  keeps them all. Merge All merges them, each group into one card.
+- **Check these**, a pair at a time: the same first name alone (first names are common), a
+  shared number on a card of two people (Rumpa & Joel and Rumpa), or the same full name with
+  different birthdays. Merge, or Keep Apart (they are not shown again). A first name inside a
+  fuller one with nothing in common (Jack and Jack (Club)) is not a duplicate.
 - **In both accounts**: one in iCloud and one in Google; mirroring pairs these.
 
 ```sh
