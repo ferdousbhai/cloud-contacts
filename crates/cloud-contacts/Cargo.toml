@@ -30,6 +30,8 @@ required-features = ["ui"]
 [features]
 default = ["ui"]
 ui = ["dep:icloud-app-ui", "dep:gtk", "dep:omui"]
+# omui's scripted QA of the window (dev/qa.sh, run by bin/check); release builds leave it off.
+qa = ["ui", "omui/qa"]
 
 [dependencies]
 icloud-session.workspace = true

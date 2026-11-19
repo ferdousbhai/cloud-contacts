@@ -128,7 +128,8 @@ export CLOUD_CONTACTS_GWS_COMMAND=$fake_gws FAKE_GWS_STATE=$root/gws.json
 export CLOUD_CONTACTS_BROWSER=true CLOUD_CONTACTS_SYSTEMCTL=true FAKE_CONTACTS_QUIET=1
 
 # A fake iCloud with its seeded contacts on a port of its own (it says which), a Google address book with Ann Lee
-# (in iCloud too) and Gus Grant twice, and both accounts linked, as a first run with the window would leave them.
+# (in iCloud too) and Gus Grant twice (dev/google-people.json), and both accounts linked, as a first run with the
+# window would leave them.
 start_accounts() {
   stop "$fake_pid"
   rm -rf -- "$HOME" "$FAKE_GWS_STATE"
@@ -143,22 +144,7 @@ start_accounts() {
   done
   [[ -n $fake ]] || { echo "preview: the fake iCloud did not start" >&2; cat "$root/fake.log" >&2; exit 1; }
   export ICLOUD_SESSION_MOCK=1 ICLOUD_SESSION_MOCK_URL=$fake
-  python3 - "$FAKE_GWS_STATE" <<'EOF_PEOPLE'
-import json, sys
-gus = lambda n: {
-    "resourceName": f"people/c{n}", "etag": f"g{n}",
-    "names": [{"givenName": "Gus", "familyName": "Grant"}],
-    "phoneNumbers": [{"value": "+1 555 0101", "type": "mobile"}],
-    "emailAddresses": [{"value": "gus@example.com", "type": "work"}] if n == 1 else [],
-}
-people = {
-    "people/c1": gus(1),
-    "people/c2": gus(2),
-    "people/c3": {"resourceName": "people/c3", "etag": "g3", "names": [{"givenName": "Ann", "familyName": "Lee"}],
-                  "organizations": [{"name": "Google Ann Co"}]},
-}
-json.dump({"people": people, "seq": 3, "calls": []}, open(sys.argv[1], "w"))
-EOF_PEOPLE
+  cp -- "$here/google-people.json" "$FAKE_GWS_STATE"
   "$target/cloud-contacts" status > /dev/null
   "$target/cloud-contacts" account add google > /dev/null 2>&1
 }

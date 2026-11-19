@@ -1,0 +1,69 @@
+# New Contact: Save waits for a name; Cancel leaves nothing behind.
+{"do":"wait","role":"list-item","name":"Bob Berg, iCloud","visible":true}
+{"do":"click","role":"button","name":"New Contact (Ctrl+N)"}
+{"do":"wait","dialog":"New Contact"}
+{"do":"wait","role":"label","name":"A contact needs a name, a company, a phone number or an email.","visible":true}
+{"do":"wait","role":"button","name":"Save","sensitive":false}
+{"do":"click","role":"button","name":"Cancel"}
+{"do":"wait","dialog":null}
+
+# Ctrl+N again: a name, a company and a phone, saved to the account first offered, Google. The new contact is in the
+# list and chosen. A field's entry has no name of its own (omui's entry_row), so a click on its row gives it the keys.
+{"do":"key","keys":"<Control>n"}
+{"do":"wait","dialog":"New Contact"}
+{"do":"click","role":"list-item","name":"First name"}
+{"do":"type","text":"Ada"}
+{"do":"wait","role":"button","name":"Save","sensitive":true}
+{"do":"wait","role":"label","name":"A contact needs a name, a company, a phone number or an email.","visible":false}
+{"do":"click","role":"list-item","name":"Add phone (work=+1 555 0100)"}
+{"do":"type","text":"+1 555 0123"}
+{"do":"click","role":"list-item","name":"Last name"}
+{"do":"type","text":"Lovelace"}
+{"do":"click","role":"list-item","name":"Company"}
+{"do":"type","text":"Analytical Engines"}
+{"do":"shot","path":"edit-new.png"}
+{"do":"click","role":"button","name":"Save"}
+{"do":"wait","dialog":null}
+{"do":"wait","toasts":["Added Ada Lovelace"]}
+{"do":"wait","role":"list-item","name":"Ada Lovelace, Analytical Engines · Google","visible":true}
+{"do":"wait","role":"label","name":"In Google","visible":true}
+{"do":"wait","role":"label","name":"+1 555 0123","visible":true}
+
+# A birthday that is not a date holds Save back; a good one lets it through, and the card shows it.
+{"do":"click","role":"button","name":"Edit (Ctrl+E)"}
+{"do":"wait","dialog":"Edit Contact"}
+{"do":"click","role":"list-item","name":"Birthday (1990-05-01, or 05-01)"}
+{"do":"type","text":"soon"}
+{"do":"wait","role":"button","name":"Save","sensitive":false}
+{"do":"shot","path":"edit-problem.png"}
+{"do":"key","keys":"<Control>a"}
+{"do":"type","text":"1815-12-10"}
+{"do":"wait","role":"button","name":"Save","sensitive":true}
+{"do":"click","role":"button","name":"Save"}
+{"do":"wait","dialog":null}
+{"do":"wait","role":"list-item","name":"birthday","visible":true}
+{"do":"shot","path":"edit-saved.png"}
+
+# Edit and Cancel changes nothing.
+{"do":"key","keys":"<Control>e"}
+{"do":"wait","dialog":"Edit Contact"}
+{"do":"click","role":"list-item","name":"Nickname"}
+{"do":"type","text":"Countess"}
+{"do":"click","role":"button","name":"Cancel"}
+{"do":"wait","dialog":null}
+{"do":"wait","role":"label","name":"Countess","visible":false}
+
+# Delete asks first; Cancel keeps the contact, Delete removes it.
+{"do":"click","role":"button","name":"Delete"}
+{"do":"wait","dialog":"Delete Ada Lovelace?"}
+{"do":"shot","path":"edit-delete.png"}
+{"do":"click","role":"button","name":"Cancel"}
+{"do":"wait","dialog":null}
+{"do":"wait","role":"list-item","name":"Ada Lovelace, Analytical Engines · Google","visible":true}
+{"do":"click","role":"button","name":"Delete"}
+{"do":"wait","dialog":"Delete Ada Lovelace?"}
+{"do":"click","role":"button","name":"Delete","in":{"role":"dialog","name":"Delete Ada Lovelace?"}}
+{"do":"wait","dialog":null}
+{"do":"wait","toasts":["Deleted Ada Lovelace"]}
+{"do":"wait","role":"list-item","name":"Ada Lovelace, Analytical Engines · Google","visible":false}
+{"do":"quit"}

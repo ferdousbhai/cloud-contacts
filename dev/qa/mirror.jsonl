@@ -1,0 +1,45 @@
+# The offers over the contacts. Turn On… looks at both accounts first, then says what mirroring would do; Cancel
+# leaves it off.
+{"do":"wait","role":"button","name":"Turn On…","visible":true}
+{"do":"click","role":"button","name":"Turn On…"}
+{"do":"wait","dialog":"Mirror Contacts Between iCloud and Google"}
+{"do":"wait","role":"label","name":"These may be one person. Neither is copied until you decide:","visible":true}
+{"do":"shot","path":"mirror-review.png"}
+{"do":"click","role":"button","name":"Cancel"}
+{"do":"wait","dialog":null}
+{"do":"wait","role":"switch","in":{"role":"list-item","name":"Mirror contacts between iCloud and Google"},"checked":false}
+
+# Not Now puts the offer away.
+{"do":"click","role":"button","name":"Not Now"}
+{"do":"wait","role":"button","name":"Turn On…","visible":false}
+
+# Review… opens the duplicates: the two Gus Grant cards in Google are likely the same, and Ann Lee is in both
+# accounts. Close, and nothing changed.
+{"do":"click","role":"button","name":"Review…"}
+{"do":"wait","dialog":"Duplicates"}
+{"do":"wait","role":"label","name":"Likely the Same","visible":true}
+{"do":"wait","role":"label","name":"In Both Accounts","visible":true}
+{"do":"shot","path":"mirror-duplicates.png"}
+{"do":"click","role":"button","name":"Close"}
+{"do":"wait","dialog":null}
+
+# Merge All leaves one Gus Grant (two rows of one name would be an error here), and the offer to review goes.
+{"do":"click","role":"button","name":"Review…"}
+{"do":"wait","dialog":"Duplicates"}
+{"do":"click","role":"button","name":"Merge All"}
+{"do":"wait","dialog":null}
+{"do":"wait","role":"label","name":"2 contacts look like duplicates of each other.","visible":false}
+{"do":"wait","role":"list-item","name":"Gus Grant, Google","visible":true}
+{"do":"shot","path":"mirror-merged.png"}
+
+# The switch below the contacts turns mirroring on through the same review, and off again.
+{"do":"set","role":"switch","in":{"role":"list-item","name":"Mirror contacts between iCloud and Google"},"checked":true}
+{"do":"wait","dialog":"Mirror Contacts Between iCloud and Google"}
+{"do":"click","role":"button","name":"Turn On"}
+{"do":"wait","dialog":null}
+{"do":"wait","role":"switch","in":{"role":"list-item","name":"Mirror contacts between iCloud and Google"},"checked":true}
+{"do":"shot","path":"mirror-on.png"}
+{"do":"set","role":"switch","in":{"role":"list-item","name":"Mirror contacts between iCloud and Google"},"checked":false}
+{"do":"wait","toasts":["Turned off: both accounts keep their contacts as they are"]}
+{"do":"wait","role":"switch","in":{"role":"list-item","name":"Mirror contacts between iCloud and Google"},"checked":false}
+{"do":"quit"}

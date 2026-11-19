@@ -51,7 +51,7 @@ them deliberately. omui's Strata and Lucide notices ship in `THIRD_PARTY_NOTICES
 ## Commands
 
 ```sh
-bin/check            # shared support, rustfmt, clippy -D warnings, tests, installer tests; .githooks/pre-push runs it
+bin/check            # shared support, rustfmt, clippy -D warnings, tests, app QA, installer tests; .githooks/pre-push runs it
 bin/check --deep     # also the random-exploration suites
 git config core.hooksPath .githooks   # once per clone (NO_CHECK=1 skips the hook)
 cargo build --release                 # target/release/cloud-contacts and cloud-contacts-app
@@ -64,6 +64,9 @@ temporary HOME and XDG directories (set `XDG_CONFIG_HOME` too: `icloud_app::test
 does not), the fake iCloud server and the fake gws. Never launch the window on the owner's
 desktop: `dev/preview.sh <out-dir> [theme-dir ...]` takes pictures of it on those fakes in a nested
 Hyprland with a private HOME, XDG directories and D-Bus (its header lists the scenes).
+`dev/qa.sh <cloud-contacts-app> dev/qa/*.jsonl` drives the window, built with feature `qa`, through
+the scripts' flows on the same fakes with omui's scripted QA (its protocol is in omui's README), on a
+private broadway display with no session bus; bin/check runs it.
 
 ## Conventions
 

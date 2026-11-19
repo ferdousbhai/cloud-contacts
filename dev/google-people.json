@@ -1,0 +1,9 @@
+{"people": {
+  "people/c1": {"resourceName": "people/c1", "etag": "g1", "names": [{"givenName": "Gus", "familyName": "Grant"}],
+                "phoneNumbers": [{"value": "+1 555 0101", "type": "mobile"}],
+                "emailAddresses": [{"value": "gus@example.com", "type": "work"}]},
+  "people/c2": {"resourceName": "people/c2", "etag": "g2", "names": [{"givenName": "Gus", "familyName": "Grant"}],
+                "phoneNumbers": [{"value": "+1 555 0101", "type": "mobile"}], "emailAddresses": []},
+  "people/c3": {"resourceName": "people/c3", "etag": "g3", "names": [{"givenName": "Ann", "familyName": "Lee"}],
+                "organizations": [{"name": "Google Ann Co"}]}
+}, "seq": 3, "calls": []}

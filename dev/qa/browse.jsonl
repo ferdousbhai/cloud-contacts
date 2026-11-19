@@ -1,0 +1,56 @@
+# The window as it opens on both stand-in accounts: every contact, the offers to mirror and to review duplicates, and
+# the first contact's card. The search has the keyboard. (The banners are still sliding in: the picture is later.)
+{"do":"wait","role":"list-item","name":"Bob Berg, iCloud","visible":true}
+{"do":"wait","role":"list-item","name":"Ann Lee, Google Ann Co · Google","visible":true}
+{"do":"wait","role":"button","name":"Turn On…","visible":true}
+{"do":"wait","role":"label","name":"2 contacts look like duplicates of each other.","visible":true}
+{"do":"wait","role":"label","name":"+1 555 010 0000","visible":true}
+{"do":"wait","focus":{"role":"search-box","name":"Search (Ctrl+F)"}}
+
+# The search finds Ann Lee by her work number, and Enter opens her card.
+{"do":"type","text":"0199"}
+{"do":"wait","role":"list-item","name":"Ann Lee, Acme · iCloud","visible":true}
+{"do":"wait","role":"list-item","name":"Bob Berg, iCloud","visible":false}
+{"do":"wait","role":"list-item","name":"Ann Lee, Google Ann Co · Google","visible":false}
+{"do":"key","keys":"Return"}
+{"do":"wait","role":"label","name":"+1 555 010 0199","visible":true}
+{"do":"wait","role":"label","name":"ann@acme.example","visible":true}
+{"do":"shot","path":"browse-card.png"}
+
+# A number on the card is copied by a click on its row.
+{"do":"click","role":"list-item","name":"mobile"}
+{"do":"wait","toasts":["Copied"]}
+
+# Ctrl+F gives the search back; emptied, it shows every contact again, and Bob Berg is chosen with the pointer.
+{"do":"key","keys":"<Control>f"}
+{"do":"wait","focus":{"role":"search-box","name":"Search (Ctrl+F)"}}
+{"do":"key","keys":"<Control>a"}
+{"do":"key","keys":"BackSpace"}
+{"do":"wait","role":"list-item","name":"Bob Berg, iCloud","visible":true}
+{"do":"select","role":"list-item","name":"Bob Berg, iCloud"}
+{"do":"wait","role":"label","name":"+47 555 01 234","visible":true}
+{"do":"shot","path":"browse-list.png"}
+
+# A search that matches nothing: no contact, and nothing to edit.
+{"do":"type","role":"search-box","name":"Search (Ctrl+F)","text":"Zelda"}
+{"do":"wait","role":"list-item","name":"Bob Berg, iCloud","visible":false}
+{"do":"wait","role":"label","name":"No Contact Selected","visible":true}
+{"do":"wait","role":"button","name":"Edit (Ctrl+E)","sensitive":false}
+{"do":"key","keys":"<Control>a"}
+{"do":"key","keys":"BackSpace"}
+{"do":"wait","role":"list-item","name":"Bob Berg, iCloud","visible":true}
+
+# A narrow window shows the list alone; a contact opens in its place, and the back button returns.
+{"do":"resize","width":420,"height":720}
+{"do":"wait","size":[420,720]}
+{"do":"wait","role":"button","name":"Contacts","visible":false}
+{"do":"wait","role":"label","name":"+47 555 01 234","visible":false}
+{"do":"shot","path":"browse-narrow-list.png"}
+{"do":"click","role":"list-item","name":"Mock User, My Card"}
+{"do":"wait","role":"label","name":"mock@example.com","visible":true}
+{"do":"wait","role":"button","name":"Contacts","visible":true}
+{"do":"wait","role":"list-item","name":"Bob Berg, iCloud","visible":false}
+{"do":"shot","path":"browse-narrow-card.png"}
+{"do":"click","role":"button","name":"Contacts"}
+{"do":"wait","role":"list-item","name":"Bob Berg, iCloud","visible":true}
+{"do":"quit"}

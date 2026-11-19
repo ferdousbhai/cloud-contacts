@@ -34,9 +34,17 @@ if [[ ${1:-} == --deep ]]; then
   cargo test --locked --workspace "${features[@]}" -- --ignored
 fi
 
+if ((${#features[@]} == 0)); then
+  # The window driven through its flows on the stand-in accounts, on a private broadway display; any GTK warning
+  # fails it. Only this build has omui's QA in it.
+  step "app QA (dev/qa)"
+  cargo build --locked -p cloud-contacts --features qa --bins --examples
+  dev/qa.sh "${CARGO_TARGET_DIR:-target}/debug/cloud-contacts-app" dev/qa/*.jsonl
+fi
+
 step "packaging"
 bash packaging/repo/test.sh
 python3 packaging/repo/test_arch.py
-bash -n bin/arch-run packaging/aur/cloud-contacts/PKGBUILD bin/build-package bin/release bin/verify-release .githooks/pre-push
+bash -n bin/arch-run packaging/aur/cloud-contacts/PKGBUILD bin/build-package bin/release bin/verify-release .githooks/pre-push dev/preview.sh dev/qa.sh
 
 printf '\nAll checks passed.\n'
