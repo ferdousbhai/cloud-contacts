@@ -1,6 +1,6 @@
 # Maintainer: Ferdous Bhai <23114244+ferdousbhai@users.noreply.github.com>
 pkgname=cloud-contacts
-pkgver=0.4.0
+pkgver=0.4.1
 pkgrel=1
 pkgdesc="Your iCloud and Google contacts side by side on Omarchy (CLI + GTK app)"
 arch=('x86_64' 'aarch64')
