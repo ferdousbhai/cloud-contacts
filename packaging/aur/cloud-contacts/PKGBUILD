@@ -6,7 +6,7 @@ pkgdesc="Your iCloud and Google contacts side by side on Omarchy (CLI + GTK app)
 arch=('x86_64' 'aarch64')
 url="https://github.com/ferdousbhai/cloud-contacts"
 license=('MIT')
-depends=('gtk4' 'libadwaita' 'glib2' 'gcc-libs' 'glibc')
+depends=('gtk4' 'glib2' 'gcc-libs' 'glibc')
 makedepends=('cargo' 'git')
 checkdepends=('python')  # the tests' stand-in for gws
 options=('!debug' '!lto')  # makepkg's C LTO breaks ring's assembly objects
@@ -52,6 +52,6 @@ package() {
   install -Dm644 -t "$pkgdir/usr/lib/systemd/user" \
     packaging/systemd/cloud-contacts-mirror.service packaging/systemd/cloud-contacts-mirror.timer
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
-  install -Dm644 NOTICE "$pkgdir/usr/share/licenses/$pkgname/NOTICE"
+  install -Dm644 -t "$pkgdir/usr/share/licenses/$pkgname" NOTICE THIRD_PARTY_NOTICES.md
   install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
 }

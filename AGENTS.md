@@ -1,7 +1,7 @@
 # cloud-contacts
 
-Your iCloud and Google contacts side by side on Omarchy/Arch: a GTK4/libadwaita window and an
-agent-friendly CLI, in Rust. Each contact lives in one account and a change goes to that account
+Your iCloud and Google contacts side by side on Omarchy/Arch: a GTK 4 window (omui's look and
+widgets, themed by Omarchy) and an agent-friendly CLI, in Rust. Each contact lives in one account and a change goes to that account
 alone; accounts are not copied into each other unless the person turns on mirroring. Sibling of Cloud Calendar and Cloudmail.
 
 This file is for working on the code. For *using* the CLI as an agent, read
@@ -43,8 +43,10 @@ One crate, `crates/cloud-contacts`:
   — a fake `gws` (`CLOUD_CONTACTS_GWS_COMMAND`, state in `FAKE_GWS_STATE`). `tests/cli.rs`
   (iCloud), `tests/google.rs` (both accounts), `tests/model.rs` (random edits, `--deep`).
 
-Dependencies on icloud-for-omarchy (icloud-session, icloud-app, icloud-app-ui) are pinned by git
-`rev` in the root `Cargo.toml`; bump it deliberately.
+Dependencies on icloud-for-omarchy (icloud-session, icloud-app, icloud-app-ui) and on
+[omui](https://github.com/ferdousbhai/omui) (the window's look, theme, icons and widgets; no
+libadwaita, which `tests/cli.rs` checks) are pinned by git `rev` in the root `Cargo.toml`; bump
+them deliberately. omui's Strata and Lucide notices ship in `THIRD_PARTY_NOTICES.md`.
 
 ## Commands
 
@@ -60,7 +62,8 @@ sudo bin/arch-run bin/build-package "$(uname -m)" /output  # disposable native A
 Tests never touch a real account, keyring, bus or desktop: they run the built binary with a
 temporary HOME and XDG directories (set `XDG_CONFIG_HOME` too: `icloud_app::testing::command`
 does not), the fake iCloud server and the fake gws. Never launch the window on the owner's
-desktop; use a Broadway display of your own (`gtk4-broadwayd :NN`, an unusual number).
+desktop: `dev/preview.sh <out-dir> [theme-dir ...]` takes pictures of it on those fakes in a nested
+Hyprland with a private HOME, XDG directories and D-Bus (its header lists the scenes).
 
 ## Conventions
 

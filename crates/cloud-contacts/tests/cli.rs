@@ -560,12 +560,15 @@ fn the_first_run_links_icloud_and_says_so_once() {
 }
 
 /// `cloud-contacts` is what agents and scripts run: it must not load GTK.
+/// The app binary does need GTK, and neither needs libadwaita: omui draws
+/// the window.
 #[test]
 fn the_command_line_binary_does_not_link_gtk() {
     assert_cli_links_no_gtk(
         env!("CARGO_BIN_EXE_cloud-contacts"),
         option_env!("CARGO_BIN_EXE_cloud-contacts-app"),
-        &["libgtk-4.", "libadwaita-1."],
+        &["libgtk-4."],
+        &["libadwaita-1."],
     );
 }
 

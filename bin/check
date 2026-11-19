@@ -16,10 +16,10 @@ step() { printf '\n==> %s\n' "$*"; }
 step "shared support"
 python3 bin/check-shared-support
 
-# The desktop app needs GTK 4 and libadwaita; without them only the CLI and the library are checked.
+# The desktop app needs GTK 4; without it only the CLI and the library are checked.
 features=()
-if ! pkg-config --exists gtk4 libadwaita-1 2>/dev/null; then
-  echo "note: skipping cloud-contacts-app (install gtk4 and libadwaita to check it)" >&2
+if ! pkg-config --exists gtk4 2>/dev/null; then
+  echo "note: skipping cloud-contacts-app (install gtk4 to check it)" >&2
   features=(--no-default-features)
 fi
 

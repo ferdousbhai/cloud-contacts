@@ -29,7 +29,7 @@ required-features = ["ui"]
 # without the GTK stack.
 [features]
 default = ["ui"]
-ui = ["dep:icloud-app-ui", "dep:gtk", "dep:adw"]
+ui = ["dep:icloud-app-ui", "dep:gtk", "dep:omui"]
 
 [dependencies]
 icloud-session.workspace = true
@@ -42,7 +42,7 @@ toml.workspace = true
 url.workspace = true
 uuid.workspace = true
 gtk = { workspace = true, optional = true }
-adw = { workspace = true, optional = true }
+omui = { workspace = true, optional = true }
 icloud-app-ui = { workspace = true, optional = true }
 
 [dev-dependencies]

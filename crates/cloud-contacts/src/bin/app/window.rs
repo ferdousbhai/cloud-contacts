@@ -12,8 +12,10 @@ use std::path::PathBuf;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
-use adw::prelude::*;
+use gtk::prelude::*;
 use gtk::{gio, glib};
+use omui::background;
+use omui::icons::name;
 
 use cloud_contacts::accounts;
 use cloud_contacts::book::{Book, Entry, Shown};
@@ -25,19 +27,23 @@ use cloud_contacts::icloud::api::SessionTransport;
 use cloud_contacts::mirror;
 use cloud_contacts::model::{self, Field, Multi};
 use cloud_contacts::store::Store;
-use icloud_app_ui::{SignInBanner, background};
+use icloud_app_ui::SignInBanner;
 
 const FETCH_SECS: u32 = 300;
+/// The width of a dialog's form where the window has room, about that of
+/// libadwaita's alert dialogs: its wrapped text would otherwise widen it to
+/// one long line.
+const DIALOG_WIDTH: i32 = 360;
 
 pub struct Window {
-    window: adw::ApplicationWindow,
-    toasts: adw::ToastOverlay,
+    window: gtk::ApplicationWindow,
+    shell: Rc<omui::Shell>,
     banner: SignInBanner,
     search: gtk::SearchEntry,
     list: gtk::ListBox,
     card: gtk::Box,
     card_stack: gtk::Stack,
-    split: adw::NavigationSplitView,
+    split: omui::Split,
     edit_button: gtk::Button,
     delete_button: gtk::Button,
     /// Which account the sidebar shows: "All Accounts", then each by name.
@@ -59,17 +65,18 @@ pub struct Window {
     /// Mirroring iCloud and Google: the offer above the contacts,
     /// and the switch with its status line below the sidebar. Neither shows
     /// without both an iCloud and a Google account.
-    ks_offer: gtk::Revealer,
-    ks_row: adw::SwitchRow,
+    ks_offer: omui::Banner,
+    ks_list: gtk::ListBox,
+    ks_row: omui::Row,
+    ks_switch: gtk::Switch,
     /// Set while the switch is moved by the window, not the person.
     ks_quiet: Cell<bool>,
     /// "N contacts look like duplicates", over the contacts, while any do.
-    dup_offer: gtk::Revealer,
-    dup_label: gtk::Label,
+    dup_offer: omui::Banner,
 }
 
 impl Window {
-    pub fn new(app: &adw::Application) -> Rc<Self> {
+    pub fn new(app: &gtk::Application) -> Rc<Self> {
         let this = Rc::new_cyclic(|weak: &Weak<Window>| {
             let (w1, w2) = (weak.clone(), weak.clone());
             let banner = SignInBanner::new(
@@ -113,7 +120,7 @@ impl Window {
     }
 
     fn toast(&self, msg: &str) {
-        self.toasts.add_toast(adw::Toast::new(msg));
+        self.shell.toast(msg);
     }
 
     fn connect(self: &Rc<Self>) {
@@ -201,7 +208,7 @@ impl Window {
         action("duplicates", |this| this.duplicates_dialog());
         action("mirror-not-now", |this| {
             let root = this.root.clone();
-            this.ks_offer.set_reveal_child(false);
+            this.ks_offer.set_revealed(false);
             background(
                 move || {
                     root.map(|r| {
@@ -215,12 +222,12 @@ impl Window {
             );
         });
         let weak = Rc::downgrade(self);
-        self.ks_row.connect_active_notify(move |row| {
+        self.ks_switch.connect_active_notify(move |switch| {
             let Some(this) = weak.upgrade() else { return };
             if this.ks_quiet.get() {
                 return;
             }
-            if row.is_active() {
+            if switch.is_active() {
                 // on only through the review; the switch shows the outcome
                 this.set_switch(false);
                 this.mirror_review();
@@ -391,39 +398,38 @@ impl Window {
     }
 
     fn confirm_unlink(self: &Rc<Self>, name: String) {
-        let dialog = adw::AlertDialog::new(
-            Some(&format!("Unlink {name}?")),
-            Some("Its contacts stay in the account; this computer stops showing them and forgets its copy."),
-        );
-        dialog.add_responses(&[("cancel", "_Cancel"), ("unlink", "_Unlink")]);
-        dialog.set_response_appearance("unlink", adw::ResponseAppearance::Destructive);
-        dialog.set_default_response(Some("cancel"));
-        dialog.set_close_response("cancel");
         let weak = Rc::downgrade(self);
-        dialog.connect_response(Some("unlink"), move |_, _| {
-            let Some(this) = weak.upgrade() else { return };
-            let root = this.root.clone();
-            let name = name.clone();
-            let weak = Rc::downgrade(&this);
-            background(
-                move || {
-                    let root = root.ok_or_else(|| Error::Other("no data directory ($HOME is not set)".into()))?;
-                    accounts::remove(&name, &root)
-                },
-                move |result| {
-                    let Some(this) = weak.upgrade() else { return };
-                    match result {
-                        Ok(Ok(note)) => this.toast(&note),
-                        Ok(Err(e)) => this.toast(&e.to_string()),
-                        Err(e) => this.toast(&e),
-                    }
-                    this.selected.borrow_mut().clear();
-                    this.shown.borrow_mut().entries.clear();
-                    this.sync();
-                },
-            );
-        });
-        dialog.present(Some(&self.window));
+        let heading = format!("Unlink {name}?");
+        let body = "Its contacts stay in the account; this computer stops showing them and forgets its copy.";
+        omui::confirm(
+            &self.window,
+            &heading,
+            body,
+            "_Unlink",
+            omui::Appearance::Destructive,
+            move || {
+                let Some(this) = weak.upgrade() else { return };
+                let root = this.root.clone();
+                let weak = Rc::downgrade(&this);
+                background(
+                    move || {
+                        let root = root.ok_or_else(|| Error::Other("no data directory ($HOME is not set)".into()))?;
+                        accounts::remove(&name, &root)
+                    },
+                    move |result| {
+                        let Some(this) = weak.upgrade() else { return };
+                        match result {
+                            Ok(Ok(note)) => this.toast(&note),
+                            Ok(Err(e)) => this.toast(&e.to_string()),
+                            Err(e) => this.toast(&e),
+                        }
+                        this.selected.borrow_mut().clear();
+                        this.shown.borrow_mut().entries.clear();
+                        this.sync();
+                    },
+                );
+            },
+        );
     }
 
     /// Syncs on a worker thread, then shows the cache.
@@ -571,10 +577,10 @@ impl Window {
             .map(|g| g.members.len())
             .sum();
         if likely > 0 {
-            self.dup_label
-                .set_label(&format!("{likely} contacts look like duplicates of each other."));
+            self.dup_offer
+                .set_title(&format!("{likely} contacts look like duplicates of each other."));
         }
-        self.dup_offer.set_reveal_child(likely > 0);
+        self.dup_offer.set_revealed(likely > 0);
     }
 
     /// Duplicates: those likely the same, merged all at once; those to
@@ -583,12 +589,12 @@ impl Window {
     fn duplicates_dialog(self: &Rc<Self>) {
         let shown = self.shown.borrow().clone();
         let (groups, across) = self.find_duplicates(&shown);
-        let page = adw::PreferencesPage::new();
-        let dialog = adw::Dialog::builder()
-            .title("Duplicates")
-            .content_width(560)
-            .content_height(640)
-            .build();
+        let (page, column) = omui::page(600);
+        let dialog = omui::Dialog::new(Some("Duplicates"), None);
+        dialog.add_response("close", "_Close");
+        dialog.set_default_response("close");
+        dialog.set_close_response("close");
+        dialog.set_content_size(560, 640);
         let entries_of =
             |g: &dedupe::Group| -> Vec<Entry> { g.members.iter().map(|&m| shown.entries[m].clone()).collect() };
         let preview = |members: &[Entry]| -> (usize, String, String) {
@@ -624,33 +630,31 @@ impl Window {
             .map(entries_of)
             .collect();
         if !likely.is_empty() {
-            let g = adw::PreferencesGroup::builder()
-                .title("Likely the Same")
-                .description("Each becomes one card with every phone, email and address of them all. Every card is saved first to a backup file.")
-                .build();
+            let g = omui::Group::new(
+                "Likely the Same",
+                "Each becomes one card with every phone, email and address of them all. Every card is saved first to a backup file.",
+            );
             let merge_all = gtk::Button::builder()
                 .label("Merge All")
                 .valign(gtk::Align::Center)
                 .css_classes(["suggested-action"])
                 .build();
-            g.set_header_suffix(Some(&merge_all));
+            g.set_header_suffix(Some(merge_all.upcast_ref()));
             for members in &likely {
                 let (_, name, detail) = preview(members);
                 let names: Vec<String> = members.iter().map(|e| e.contact.display_name()).collect();
-                g.add(
-                    &adw::ActionRow::builder()
-                        .title(glib::markup_escape_text(&name).as_str())
-                        .subtitle(glib::markup_escape_text(&format!("{detail} · from {}", names.join(", "))).as_str())
-                        .build(),
-                );
+                g.add(&omui::Row::new(&name, &format!("{detail} · from {}", names.join(", "))).widget);
             }
-            let (weak, d) = (Rc::downgrade(self), dialog.clone());
+            // Weak: the dialog owns the button.
+            let (weak, d) = (Rc::downgrade(self), dialog.downgrade());
             merge_all.connect_clicked(move |_| {
-                let Some(this) = weak.upgrade() else { return };
+                let (Some(this), Some(d)) = (weak.upgrade(), d.upgrade()) else {
+                    return;
+                };
                 d.close();
                 this.merge_groups(likely.clone());
             });
-            page.add(&g);
+            column.append(&g.widget);
         }
         let check: Vec<(Vec<Entry>, String)> = groups
             .iter()
@@ -658,16 +662,13 @@ impl Window {
             .map(|g| (entries_of(g), g.why.join(", ")))
             .collect();
         if !check.is_empty() {
-            let g = adw::PreferencesGroup::builder()
-                .title("Check These")
-                .description("They share a name or a number, but may be different people.")
-                .build();
+            let g = omui::Group::new(
+                "Check These",
+                "They share a name or a number, but may be different people.",
+            );
             for (members, why) in check {
                 let names: Vec<String> = members.iter().map(|e| e.contact.display_name()).collect();
-                let row = adw::ActionRow::builder()
-                    .title(glib::markup_escape_text(&names.join(" · ")).as_str())
-                    .subtitle(glib::markup_escape_text(&why).as_str())
-                    .build();
+                let row = omui::Row::new(&names.join(" · "), &why);
                 let apart = gtk::Button::builder()
                     .label("Keep Apart")
                     .valign(gtk::Align::Center)
@@ -675,17 +676,19 @@ impl Window {
                 let merge = gtk::Button::builder().label("Merge").valign(gtk::Align::Center).build();
                 row.add_suffix(&apart);
                 row.add_suffix(&merge);
-                let (weak, d, m) = (Rc::downgrade(self), dialog.clone(), members.clone());
+                let (weak, d, m) = (Rc::downgrade(self), dialog.downgrade(), members.clone());
                 merge.connect_clicked(move |_| {
-                    let Some(this) = weak.upgrade() else { return };
+                    let (Some(this), Some(d)) = (weak.upgrade(), d.upgrade()) else {
+                        return;
+                    };
                     d.close();
                     this.merge_groups(vec![m.clone()]);
                 });
-                let (weak, r) = (Rc::downgrade(self), row.clone());
+                let (weak, r) = (Rc::downgrade(self), row.widget.downgrade());
                 apart.connect_clicked(move |_| {
                     let Some(this) = weak.upgrade() else { return };
                     let ids: Vec<String> = members.iter().map(Entry::id).collect();
-                    if let Some(root) = this.root.clone() {
+                    if let (Some(root), Some(r)) = (this.root.clone(), r.upgrade()) {
                         r.set_sensitive(false);
                         let weak = Rc::downgrade(&this);
                         background(
@@ -704,49 +707,35 @@ impl Window {
                         );
                     }
                 });
-                g.add(&row);
+                g.add(&row.widget);
             }
-            page.add(&g);
+            column.append(&g.widget);
         }
         if !across.is_empty() {
-            let g = adw::PreferencesGroup::builder()
-                .title("In Both Accounts")
-                .description("Mirroring iCloud and Google pairs these, keeping one in each account.")
-                .build();
+            let g = omui::Group::new(
+                "In Both Accounts",
+                "Mirroring iCloud and Google pairs these, keeping one in each account.",
+            );
             for p in &across {
                 let (a, b) = (&shown.entries[p.a], &shown.entries[p.b]);
-                g.add(
-                    &adw::ActionRow::builder()
-                        .title(
-                            glib::markup_escape_text(&format!(
-                                "{} ({}) · {} ({})",
-                                a.contact.display_name(),
-                                a.label(),
-                                b.contact.display_name(),
-                                b.label()
-                            ))
-                            .as_str(),
-                        )
-                        .subtitle(glib::markup_escape_text(&p.why.join(", ")).as_str())
-                        .build(),
+                let title = format!(
+                    "{} ({}) · {} ({})",
+                    a.contact.display_name(),
+                    a.label(),
+                    b.contact.display_name(),
+                    b.label()
                 );
+                g.add(&omui::Row::new(&title, &p.why.join(", ")).widget);
             }
-            page.add(&g);
+            column.append(&g.widget);
         }
-        let view = adw::ToolbarView::new();
-        view.add_top_bar(&adw::HeaderBar::new());
         if groups.is_empty() && across.is_empty() {
-            view.set_content(Some(
-                &adw::StatusPage::builder()
-                    .icon_name("avatar-default-symbolic")
-                    .title("No Duplicates")
-                    .build(),
-            ));
+            let none = omui::EmptyState::new(Some(name::USER), "No Duplicates", None);
+            dialog.set_extra_child(Some(none.widget.upcast_ref()));
         } else {
-            view.set_content(Some(&page));
+            dialog.set_extra_child(Some(page.upcast_ref()));
         }
-        dialog.set_child(Some(&view));
-        dialog.present(Some(&self.window));
+        dialog.present(&self.window);
     }
 
     /// Merges each group into its fullest card (see `dedupe::apply`), and
@@ -790,7 +779,7 @@ impl Window {
     /// Moves the switch without taking it for the person's move.
     fn set_switch(&self, on: bool) {
         self.ks_quiet.set(true);
-        self.ks_row.set_active(on);
+        self.ks_switch.set_active(on);
         self.ks_quiet.set(false);
     }
 
@@ -814,14 +803,14 @@ impl Window {
                 let Some(this) = weak.upgrade() else { return };
                 match result.ok().flatten() {
                     Some(mirror::Shown::Switch { on, line, offer }) => {
-                        this.ks_row.set_visible(true);
+                        this.ks_list.set_visible(true);
                         this.set_switch(on);
                         this.ks_row.set_subtitle(&line);
-                        this.ks_offer.set_reveal_child(offer);
+                        this.ks_offer.set_revealed(offer);
                     }
                     _ => {
-                        this.ks_row.set_visible(false);
-                        this.ks_offer.set_reveal_child(false);
+                        this.ks_list.set_visible(false);
+                        this.ks_offer.set_revealed(false);
                     }
                 }
             },
@@ -830,23 +819,24 @@ impl Window {
 
     /// Right after the second kind of account is linked.
     fn offer_after_link(self: &Rc<Self>) {
-        let dialog = adw::AlertDialog::new(
+        let dialog = omui::Dialog::new(
             Some("Mirror Contacts Between iCloud and Google?"),
             Some(
                 "A contact added, changed or deleted in one would be in the other too. You can turn this on later below the contacts.",
             ),
         );
-        dialog.add_responses(&[("later", "_Not Now"), ("on", "_Turn On…")]);
-        dialog.set_response_appearance("on", adw::ResponseAppearance::Suggested);
-        dialog.set_default_response(Some("on"));
+        dialog.add_response("later", "_Not Now");
+        dialog.add_response("on", "_Turn On…");
+        dialog.set_response_appearance("on", omui::Appearance::Suggested);
+        dialog.set_default_response("on");
         dialog.set_close_response("later");
         let weak = Rc::downgrade(self);
-        dialog.connect_response(Some("on"), move |_, _| {
-            if let Some(this) = weak.upgrade() {
+        dialog.connect_response(move |_, id| {
+            if let (Some(this), "on") = (weak.upgrade(), id) {
                 this.mirror_review();
             }
         });
-        dialog.present(Some(&self.window));
+        dialog.present(&self.window);
     }
 
     /// The two accounts' providers, opened, for the engine.
@@ -920,13 +910,9 @@ impl Window {
                 .build();
             let options = gtk::StringList::new(&["Decide Later", "Same Person", "Different People"]);
             for (p, (i, g)) in plan.doubtful.iter().zip(&names) {
-                let row = adw::ComboRow::builder()
-                    .title(format!("{i} (iCloud) · {g} (Google)"))
-                    .subtitle(&p.why)
-                    .model(&options)
-                    .build();
-                list.append(&row);
-                choices.push((p.clone(), row));
+                let (row, choice) = omui::combo_row(&format!("{i} (iCloud) · {g} (Google)"), &p.why, &options, 0);
+                list.append(&row.widget);
+                choices.push((p.clone(), choice));
             }
             body.append(
                 &gtk::ScrolledWindow::builder()
@@ -937,15 +923,19 @@ impl Window {
                     .build(),
             );
         }
-        let dialog = adw::AlertDialog::new(Some("Mirror Contacts Between iCloud and Google"), None);
-        dialog.set_extra_child(Some(&body));
-        dialog.add_responses(&[("cancel", "_Cancel"), ("on", "_Turn On")]);
-        dialog.set_response_appearance("on", adw::ResponseAppearance::Suggested);
-        dialog.set_default_response(Some("on"));
+        let dialog = omui::Dialog::new(Some("Mirror Contacts Between iCloud and Google"), None);
+        dialog.set_extra_child(Some(body.upcast_ref()));
+        dialog.set_content_size(DIALOG_WIDTH, -1);
+        dialog.add_response("cancel", "_Cancel");
+        dialog.add_response("on", "_Turn On");
+        dialog.set_response_appearance("on", omui::Appearance::Suggested);
+        dialog.set_default_response("on");
         dialog.set_close_response("cancel");
         let weak = Rc::downgrade(self);
-        dialog.connect_response(Some("on"), move |_, _| {
-            let Some(this) = weak.upgrade() else { return };
+        dialog.connect_response(move |_, id| {
+            let (Some(this), "on") = (weak.upgrade(), id) else {
+                return;
+            };
             let decisions: Vec<(String, String, mirror::Decision)> = choices
                 .iter()
                 .filter_map(|(p, row)| {
@@ -984,7 +974,7 @@ impl Window {
                 },
             );
         });
-        dialog.present(Some(&self.window));
+        dialog.present(&self.window);
     }
 
     fn mirror_off(self: &Rc<Self>) {
@@ -1045,26 +1035,27 @@ impl Window {
                 "The contact is deleted from iCloud on all your devices. iCloud keeps no Recently Deleted for contacts."
             }
         };
-        let dialog = adw::AlertDialog::new(Some(&format!("Delete {name}?")), Some(body));
-        dialog.add_responses(&[("cancel", "_Cancel"), ("delete", "_Delete")]);
-        dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
-        dialog.set_default_response(Some("cancel"));
-        dialog.set_close_response("cancel");
         let weak = Rc::downgrade(self);
-        dialog.connect_response(Some("delete"), move |_, _| {
-            let Some(this) = weak.upgrade() else { return };
-            let (c, name) = (c.clone(), name.clone());
-            this.write(
-                move |book| book.delete(&c),
-                move |this, warning| {
-                    this.selected.borrow_mut().clear();
-                    this.split.set_show_content(false);
-                    this.toast(&warning.unwrap_or_else(|| format!("Deleted {name}")));
-                },
-                |_| {},
-            );
-        });
-        dialog.present(Some(&self.window));
+        let heading = format!("Delete {name}?");
+        omui::confirm(
+            &self.window,
+            &heading,
+            body,
+            "_Delete",
+            omui::Appearance::Destructive,
+            move || {
+                let Some(this) = weak.upgrade() else { return };
+                this.write(
+                    move |book| book.delete(&c),
+                    move |this, warning| {
+                        this.selected.borrow_mut().clear();
+                        this.split.set_show_content(false);
+                        this.toast(&warning.unwrap_or_else(|| format!("Deleted {name}")));
+                    },
+                    |_| {},
+                );
+            },
+        );
     }
 
     /// The add (`contact` `None`) or edit dialog, filled from the contact's
@@ -1082,44 +1073,37 @@ impl Window {
         } else {
             "New Contact"
         };
-        let dialog = adw::AlertDialog::new(Some(heading), None);
+        let dialog = omui::Dialog::new(Some(heading), None);
         let body = gtk::Box::new(gtk::Orientation::Vertical, 12);
         // A new contact goes to one account: the one the sidebar shows, else
         // the first; with several, the person picks.
         let titles: Vec<String> = accounts.iter().map(|(n, p)| account_title(n, p)).collect();
         let account_list = gtk::StringList::new(&titles.iter().map(String::as_str).collect::<Vec<_>>());
-        let account_row = adw::ComboRow::builder().title("Account").model(&account_list).build();
         let start = self
             .filter_account()
             .and_then(|f| accounts.iter().position(|(n, _)| *n == f))
             .unwrap_or(0);
-        account_row.set_selected(start as u32);
-        if contact.is_none() && accounts.len() > 1 {
-            let list = gtk::ListBox::builder()
-                .selection_mode(gtk::SelectionMode::None)
-                .css_classes(["boxed-list"])
-                .build();
-            list.append(&account_row);
-            body.append(&list);
-        }
-        let group = |rows: &[&adw::EntryRow]| {
+        let (account_row, account_choice) = omui::combo_row("Account", "", &account_list, start as u32);
+        let group = |rows: &[&omui::Row]| {
             let list = gtk::ListBox::builder()
                 .selection_mode(gtk::SelectionMode::None)
                 .css_classes(["boxed-list"])
                 .build();
             for r in rows {
-                list.append(*r);
+                list.append(&r.widget);
             }
             body.append(&list);
-            list
         };
-        let entry = |title: &str, text: &str| adw::EntryRow::builder().title(title).text(text).build();
-        let scalars: Vec<(Field, adw::EntryRow)> = SCALARS
+        if contact.is_none() && accounts.len() > 1 {
+            group(&[&account_row]);
+        }
+        let scalars: Vec<(Field, (omui::Row, gtk::Entry))> = SCALARS
             .iter()
-            .map(|(f, title)| (*f, entry(title, draft.scalar(*f))))
+            .map(|(f, title)| (*f, omui::entry_row(title, draft.scalar(*f))))
             .collect();
-        group(&scalars[..3].iter().map(|(_, r)| r).collect::<Vec<_>>());
-        group(&scalars[3..].iter().map(|(_, r)| r).collect::<Vec<_>>());
+        group(&scalars[..3].iter().map(|(_, (r, _))| r).collect::<Vec<_>>());
+        group(&scalars[3..].iter().map(|(_, (r, _))| r).collect::<Vec<_>>());
+        let scalars: Vec<(Field, gtk::Entry)> = scalars.into_iter().map(|(f, (_, e))| (f, e)).collect();
         // One row per value, titled by its label, and an empty one to add.
         let mut multis: Vec<(Multi, Vec<ValueRow>)> = Vec::new();
         for (m, add_title) in [
@@ -1127,14 +1111,19 @@ impl Window {
             (Multi::Email, "Add email"),
             (Multi::Url, "Add URL"),
         ] {
-            let mut rows: Vec<ValueRow> = draft
+            let mut rows: Vec<(Option<Row>, (omui::Row, gtk::Entry))> = draft
                 .values(m)
                 .iter()
-                .map(|r| (Some(r.clone()), entry(&model::label_display(&r.label), &r.value)))
+                .map(|r| {
+                    (
+                        Some(r.clone()),
+                        omui::entry_row(&model::label_display(&r.label), &r.value),
+                    )
+                })
                 .collect();
-            rows.push((None, entry(add_title, "")));
-            group(&rows.iter().map(|(_, r)| r).collect::<Vec<_>>());
-            multis.push((m, rows));
+            rows.push((None, omui::entry_row(add_title, "")));
+            group(&rows.iter().map(|(_, (r, _))| r).collect::<Vec<_>>());
+            multis.push((m, rows.into_iter().map(|(shown, (_, e))| (shown, e)).collect()));
         }
         let notes = gtk::TextView::builder()
             .wrap_mode(gtk::WrapMode::WordChar)
@@ -1162,16 +1151,19 @@ impl Window {
             .build();
         body.append(&problem);
         dialog.set_extra_child(Some(
-            &gtk::ScrolledWindow::builder()
+            gtk::ScrolledWindow::builder()
                 .child(&body)
                 .hscrollbar_policy(gtk::PolicyType::Never)
                 .propagate_natural_height(true)
                 .max_content_height(520)
-                .build(),
+                .build()
+                .upcast_ref(),
         ));
-        dialog.add_responses(&[("cancel", "_Cancel"), ("save", "_Save")]);
-        dialog.set_response_appearance("save", adw::ResponseAppearance::Suggested);
-        dialog.set_default_response(Some("save"));
+        dialog.set_content_size(DIALOG_WIDTH, -1);
+        dialog.add_response("cancel", "_Cancel");
+        dialog.add_response("save", "_Save");
+        dialog.set_response_appearance("save", omui::Appearance::Suggested);
+        dialog.set_default_response("save");
         dialog.set_close_response("cancel");
 
         let scalars = Rc::new(scalars);
@@ -1206,10 +1198,12 @@ impl Window {
             }
         });
         // Save is enabled only while the draft is valid, so a mistake never
-        // closes the dialog and loses the edits.
+        // closes the dialog and loses the edits. Weak: the dialog owns the
+        // entries this is connected to.
         let validate = Rc::new({
-            let (dialog, problem, read, before) = (dialog.clone(), problem.clone(), read.clone(), before.clone());
+            let (dialog, problem, read, before) = (dialog.downgrade(), problem.clone(), read.clone(), before.clone());
             move || {
+                let Some(dialog) = dialog.upgrade() else { return };
                 let text = read().problem(&before);
                 problem.set_visible(text.is_some());
                 problem.set_label(text.as_deref().unwrap_or(""));
@@ -1229,8 +1223,10 @@ impl Window {
         validate();
 
         let weak = Rc::downgrade(self);
-        dialog.connect_response(Some("save"), move |_, _| {
-            let Some(this) = weak.upgrade() else { return };
+        dialog.connect_response(move |_, id| {
+            let (Some(this), "save") = (weak.upgrade(), id) else {
+                return;
+            };
             let typed = read();
             let changes = typed.changes(&before);
             let retry = {
@@ -1238,7 +1234,7 @@ impl Window {
                 move |this: &Rc<Window>| this.edit_draft(contact, Some(typed))
             };
             let account = accounts
-                .get(account_row.selected() as usize)
+                .get(account_choice.selected() as usize)
                 .map(|(n, _)| n.clone())
                 .unwrap_or_default();
             match contact.clone() {
@@ -1269,7 +1265,7 @@ impl Window {
                 ),
             }
         });
-        dialog.present(Some(&self.window));
+        dialog.present(&self.window);
     }
 
     /// Rebuilds the sidebar from the cache (keeping the selection), then
@@ -1333,11 +1329,9 @@ impl Window {
         };
         let c = &entry.contact;
         self.card_stack.set_visible_child_name("card");
-        while let Some(child) = self.card.first_child() {
-            self.card.remove(&child);
-        }
+        omui::clear(&self.card);
         let name = c.display_name();
-        let avatar = adw::Avatar::new(96, Some(&name), true);
+        let avatar = omui::avatar(96, &name);
         avatar.set_margin_top(12);
         self.card.append(&avatar);
         self.card.append(
@@ -1364,7 +1358,7 @@ impl Window {
                 );
             }
         }
-        let group = |rows: Vec<adw::ActionRow>| {
+        let group = |rows: Vec<omui::Row>| {
             if rows.is_empty() {
                 return;
             }
@@ -1374,7 +1368,7 @@ impl Window {
                 .margin_top(6)
                 .build();
             for r in rows {
-                list.append(&r);
+                list.append(&r.widget);
             }
             self.card.append(&list);
         };
@@ -1425,25 +1419,19 @@ impl Window {
     }
 
     /// A row showing `value` under `label`; a click copies or opens it.
-    fn value_row(self: &Rc<Self>, label: &str, value: &str, action: Action) -> adw::ActionRow {
-        // Markup off first: the builder sets properties in order, and a value
-        // with an ampersand is no markup.
-        let row = adw::ActionRow::builder()
-            .use_markup(false)
-            .title(label)
-            .subtitle(value)
-            .activatable(true)
-            .css_classes(["property"])
-            .build();
+    fn value_row(self: &Rc<Self>, label: &str, value: &str, action: Action) -> omui::Row {
+        let row = omui::Row::new(label, value).property();
         row.set_subtitle_selectable(true);
         let (icon, tip) = match &action {
-            Action::Copy => ("edit-copy-symbolic", "Copy"),
-            Action::Open(_) => ("adw-external-link-symbolic", "Open"),
+            Action::Copy => (name::COPY, "Copy"),
+            Action::Open(_) => (name::EXTERNAL_LINK, "Open"),
         };
-        row.add_suffix(&gtk::Image::builder().icon_name(icon).tooltip_text(tip).build());
+        let hint = omui::icon(icon);
+        hint.set_tooltip_text(Some(tip));
+        row.add_suffix(&hint);
         let weak = Rc::downgrade(self);
         let value = value.to_owned();
-        row.connect_activated(move |_| {
+        row.connect_activated(move || {
             let Some(this) = weak.upgrade() else { return };
             match &action {
                 Action::Copy => {
@@ -1471,8 +1459,8 @@ enum Action {
 
 /// A row of the dialog for one phone, email or URL: the draft's row it
 /// shows (its label and the stored value it came from), or `None` for the
-/// row that adds one.
-type ValueRow = (Option<Row>, adw::EntryRow);
+/// row that adds one, and the field typed in.
+type ValueRow = (Option<Row>, gtk::Entry);
 
 /// How an account is named in the window: "iCloud", "Google", or the
 /// service and its name when that differs ("Google (work)").
@@ -1490,7 +1478,7 @@ fn contact_row(e: &Entry, several: bool) -> gtk::ListBoxRow {
     let (c, me) = (&e.contact, e.me);
     let name = c.display_name();
     let b = gtk::Box::builder().spacing(10).margin_top(4).margin_bottom(4).build();
-    b.append(&adw::Avatar::new(32, Some(&name), true));
+    b.append(&omui::avatar(32, &name));
     let text = gtk::Box::new(gtk::Orientation::Vertical, 0);
     text.set_valign(gtk::Align::Center);
     text.append(
@@ -1532,7 +1520,7 @@ fn contact_row(e: &Entry, several: bool) -> gtk::ListBoxRow {
     row
 }
 
-fn build(app: &adw::Application, banner: SignInBanner) -> Window {
+fn build(app: &gtk::Application, banner: SignInBanner) -> Window {
     // Sidebar: search and the contacts.
     let search = gtk::SearchEntry::builder()
         .placeholder_text("Search (Ctrl+F)")
@@ -1543,43 +1531,24 @@ fn build(app: &adw::Application, banner: SignInBanner) -> Window {
     let list = gtk::ListBox::builder()
         .selection_mode(gtk::SelectionMode::Single)
         .activate_on_single_click(true)
-        .css_classes(["navigation-sidebar"])
         .build();
     list.set_placeholder(Some(
-        &adw::StatusPage::builder()
-            .icon_name("avatar-default-symbolic")
-            .title("No Contacts")
-            .css_classes(["compact"])
-            .build(),
+        &omui::EmptyState::new(Some(name::USER), "No Contacts", None)
+            .compact()
+            .widget,
     ));
-    let sidebar_header = adw::HeaderBar::new();
+    let sidebar_header = omui::header(Some(omui::Title::new("Contacts", "").widget.upcast_ref()));
     // Refresh (Ctrl+R) and Duplicates in one menu: with three buttons the
     // sidebar still has room to say "Contacts"
     let main_menu = gio::Menu::new();
     main_menu.append(Some("Refresh"), Some("win.refresh"));
     main_menu.append(Some("Duplicates…"), Some("win.duplicates"));
-    sidebar_header.pack_start(
-        &gtk::MenuButton::builder()
-            .icon_name("open-menu-symbolic")
-            .tooltip_text("Main Menu")
-            .menu_model(&main_menu)
-            .build(),
-    );
+    sidebar_header.pack_start(&menu_button(name::MENU, "Main Menu", &main_menu));
     let accounts_menu = gio::Menu::new();
-    sidebar_header.pack_end(
-        &gtk::MenuButton::builder()
-            .icon_name("system-users-symbolic")
-            .tooltip_text("Accounts")
-            .menu_model(&accounts_menu)
-            .build(),
-    );
-    sidebar_header.pack_end(
-        &gtk::Button::builder()
-            .icon_name("list-add-symbolic")
-            .tooltip_text("New Contact (Ctrl+N)")
-            .action_name("win.new")
-            .build(),
-    );
+    sidebar_header.pack_end(&menu_button(name::USERS, "Accounts", &accounts_menu));
+    let new = omui::icon_button(name::ADD, "New Contact (Ctrl+N)");
+    new.set_action_name(Some("win.new"));
+    sidebar_header.pack_end(&new);
     let filter_names = gtk::StringList::new(&["All Accounts"]);
     let filter = gtk::DropDown::builder()
         .model(&filter_names)
@@ -1589,15 +1558,15 @@ fn build(app: &adw::Application, banner: SignInBanner) -> Window {
         .visible(false)
         .tooltip_text("Show one account's contacts")
         .build();
-    let sidebar_body = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    let sidebar_body = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .css_classes(["sidebar"])
+        .vexpand(true)
+        .build();
     sidebar_body.append(&filter);
     sidebar_body.append(&search);
     sidebar_body.append(&gtk::ScrolledWindow::builder().child(&list).vexpand(true).build());
-    let ks_row = adw::SwitchRow::builder()
-        .title("Mirror contacts between iCloud and Google")
-        .subtitle("Off")
-        .visible(false)
-        .build();
+    let (ks_row, ks_switch) = omui::switch_row("Mirror contacts between iCloud and Google", "Off", false);
     let ks_list = gtk::ListBox::builder()
         .selection_mode(gtk::SelectionMode::None)
         .css_classes(["boxed-list"])
@@ -1605,129 +1574,93 @@ fn build(app: &adw::Application, banner: SignInBanner) -> Window {
         .margin_end(8)
         .margin_top(6)
         .margin_bottom(8)
+        .visible(false)
         .build();
-    ks_list.append(&ks_row);
-    ks_row
-        .bind_property("visible", &ks_list, "visible")
-        .sync_create()
-        .build();
-    sidebar_body.append(&ks_list);
-    let sidebar_tv = adw::ToolbarView::new();
-    sidebar_tv.add_top_bar(&sidebar_header);
-    sidebar_tv.set_content(Some(&sidebar_body));
-    let sidebar_page = adw::NavigationPage::builder()
-        .title("Contacts")
-        .child(&sidebar_tv)
-        .build();
+    ks_list.append(&ks_row.widget);
+    // In a scrolled window, whose least height is the same at any width:
+    // omui's split, asked how tall it is for no width in particular, measures
+    // its panes at their natural width, where this title takes one line, and
+    // the window would then widen past a narrow tile for the title to fit so.
+    sidebar_body.append(
+        &gtk::ScrolledWindow::builder()
+            .child(&ks_list)
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .propagate_natural_height(true)
+            .build(),
+    );
+    let sidebar = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    sidebar.append(&sidebar_header);
+    sidebar.append(&sidebar_body);
 
-    // Content: the chosen card.
-    let edit_button = gtk::Button::builder()
-        .icon_name("document-edit-symbolic")
-        .tooltip_text("Edit (Ctrl+E)")
-        .action_name("win.edit")
-        .build();
-    let delete_button = gtk::Button::builder()
-        .icon_name("user-trash-symbolic")
-        .tooltip_text("Delete")
-        .action_name("win.delete")
-        .build();
-    let content_header = adw::HeaderBar::builder().show_title(false).build();
+    // Content: the chosen card, with a way back to the list when the two
+    // do not fit side by side.
+    let back = omui::icon_button(name::BACK, "Contacts");
+    let edit_button = omui::icon_button(name::EDIT, "Edit (Ctrl+E)");
+    edit_button.set_action_name(Some("win.edit"));
+    let delete_button = omui::icon_button(name::DELETE, "Delete");
+    delete_button.set_action_name(Some("win.delete"));
+    let content_header = omui::header(Some(gtk::Box::new(gtk::Orientation::Horizontal, 0).upcast_ref()));
+    content_header.pack_start(&back);
     content_header.pack_end(&delete_button);
     content_header.pack_end(&edit_button);
     let card = gtk::Box::new(gtk::Orientation::Vertical, 6);
-    let clamp = adw::Clamp::builder()
-        .maximum_size(560)
-        .child(&card)
-        .margin_top(12)
-        .margin_bottom(24)
-        .margin_start(12)
-        .margin_end(12)
-        .build();
+    let clamp = omui::clamp(&card, 560);
+    clamp.set_margin_top(12);
+    clamp.set_margin_bottom(24);
+    clamp.set_margin_start(12);
+    clamp.set_margin_end(12);
     let card_stack = gtk::Stack::new();
     card_stack.add_named(
-        &gtk::ScrolledWindow::builder().child(&clamp).vexpand(true).build(),
+        &gtk::ScrolledWindow::builder()
+            .child(&clamp)
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .vexpand(true)
+            .build(),
         Some("card"),
     );
     card_stack.add_named(
-        &adw::StatusPage::builder()
-            .icon_name("avatar-default-symbolic")
-            .title("No Contact Selected")
-            .build(),
+        &omui::EmptyState::new(Some(name::USER), "No Contact Selected", None).widget,
         Some("empty"),
     );
-    let content_tv = adw::ToolbarView::new();
-    content_tv.add_top_bar(&content_header);
-    content_tv.set_content(Some(&card_stack));
-    let content_page = adw::NavigationPage::builder()
-        .title("Contact")
-        .child(&content_tv)
-        .build();
+    let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    content.append(&content_header);
+    content.append(&card_stack);
 
-    let split = adw::NavigationSplitView::builder()
-        .sidebar(&sidebar_page)
-        .content(&content_page)
-        .min_sidebar_width(240.0)
-        .max_sidebar_width(320.0)
-        .build();
+    let split = omui::Split::new(&sidebar, &content, (240, 320), Some(600));
+    back.set_visible(false);
+    split.connect_changed({
+        let back = back.downgrade();
+        move |split| {
+            if let Some(back) = back.upgrade() {
+                back.set_visible(split.is_collapsed());
+            }
+        }
+    });
+    back.connect_clicked({
+        let split = split.downgrade();
+        move |_| {
+            if let Some(split) = split.upgrade() {
+                split.set_show_content(false);
+            }
+        }
+    });
     let body = gtk::Box::new(gtk::Orientation::Vertical, 0);
     body.append(&banner.widget);
-    let offer = gtk::Box::builder()
-        .spacing(12)
-        .margin_start(12)
-        .margin_end(12)
-        .margin_top(6)
-        .margin_bottom(6)
-        .build();
-    offer.append(
-        &gtk::Label::builder()
-            .label("Your iCloud and Google contacts are separate. Mirror them?")
-            .hexpand(true)
-            .xalign(0.0)
-            .wrap(true)
-            .build(),
-    );
-    offer.append(
-        &gtk::Button::builder()
-            .label("Not Now")
-            .action_name("win.mirror-not-now")
-            .build(),
-    );
-    offer.append(
-        &gtk::Button::builder()
-            .label("Turn On…")
-            .action_name("win.mirror-review")
-            .css_classes(["suggested-action"])
-            .build(),
-    );
-    let ks_offer = gtk::Revealer::builder()
-        .child(&offer)
-        .reveal_child(false)
-        .css_classes(["toolbar"])
-        .build();
-    body.append(&ks_offer);
-    let dup_label = gtk::Label::builder().hexpand(true).xalign(0.0).wrap(true).build();
-    let dup_box = gtk::Box::builder()
-        .spacing(12)
-        .margin_start(12)
-        .margin_end(12)
-        .margin_top(6)
-        .margin_bottom(6)
-        .build();
-    dup_box.append(&dup_label);
-    dup_box.append(
-        &gtk::Button::builder()
-            .label("Review…")
-            .action_name("win.duplicates")
-            .build(),
-    );
-    let dup_offer = gtk::Revealer::builder()
-        .child(&dup_box)
-        .reveal_child(false)
-        .css_classes(["toolbar"])
-        .build();
-    body.append(&dup_offer);
-    split.set_vexpand(true);
-    body.append(&split);
+    let ks_offer = omui::Banner::new("Your iCloud and Google contacts are separate. Mirror them?", None);
+    ks_offer
+        .add_button("Not Now", false)
+        .set_action_name(Some("win.mirror-not-now"));
+    ks_offer
+        .add_button("Turn On…", true)
+        .set_action_name(Some("win.mirror-review"));
+    body.append(&ks_offer.widget);
+    let dup_offer = omui::Banner::new("", None);
+    dup_offer
+        .add_button("Review…", false)
+        .set_action_name(Some("win.duplicates"));
+    body.append(&dup_offer.widget);
+    split.widget.set_vexpand(true);
+    body.append(&split.widget);
     // With no account linked: a page that links one.
     let welcome_buttons = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
@@ -1746,23 +1679,20 @@ fn build(app: &adw::Application, banner: SignInBanner) -> Window {
                 .build(),
         );
     }
-    let welcome = adw::ToolbarView::new();
-    welcome.add_top_bar(&adw::HeaderBar::new());
-    welcome.set_content(Some(
-        &adw::StatusPage::builder()
-            .icon_name("avatar-default-symbolic")
-            .title("Your Contacts")
-            .description("Link your iCloud or Google account to see its contacts here. Each account keeps its own.")
-            .child(&welcome_buttons)
-            .build(),
-    ));
+    let welcome_page = omui::EmptyState::new(
+        Some(name::USER),
+        "Your Contacts",
+        Some("Link your iCloud or Google account to see its contacts here. Each account keeps its own."),
+    );
+    welcome_page.set_child(Some(welcome_buttons.upcast_ref()));
+    let welcome = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    welcome.append(&omui::header(None));
+    welcome.append(&welcome_page.widget);
     let stack = gtk::Stack::new();
     stack.add_named(&body, Some("contacts"));
     stack.add_named(&welcome, Some("welcome"));
-    let toasts = adw::ToastOverlay::new();
-    toasts.set_child(Some(&stack));
 
-    let window = adw::ApplicationWindow::builder()
+    let window = gtk::ApplicationWindow::builder()
         .application(app)
         .title("Contacts")
         .icon_name(super::APP_ID)
@@ -1770,15 +1700,14 @@ fn build(app: &adw::Application, banner: SignInBanner) -> Window {
         .default_height(640)
         .width_request(360)
         .height_request(320)
-        .content(&toasts)
         .build();
-    let narrow = adw::Breakpoint::new(adw::BreakpointCondition::parse("max-width: 600sp").expect("valid condition"));
-    narrow.add_setter(&split, "collapsed", Some(&true.to_value()));
-    window.add_breakpoint(narrow);
+    // The header bars are the panes' own, in the content.
+    omui::claim_titlebar(&window);
+    let shell = omui::Shell::new(&window, &stack);
 
     Window {
         window,
-        toasts,
+        shell,
         banner,
         search,
         list,
@@ -1800,11 +1729,24 @@ fn build(app: &adw::Application, banner: SignInBanner) -> Window {
         syncing: Cell::new(false),
         last_error: RefCell::default(),
         ks_offer,
+        ks_list,
         ks_row,
+        ks_switch,
         ks_quiet: Cell::new(false),
         dup_offer,
-        dup_label,
     }
+}
+
+/// A header bar's button that opens `menu`, drawn as omui's icon buttons are.
+fn menu_button(icon: &str, tooltip: &str, menu: &gio::Menu) -> gtk::MenuButton {
+    let button = gtk::MenuButton::builder()
+        .icon_name(icon)
+        .tooltip_text(tooltip)
+        .has_frame(false)
+        .menu_model(menu)
+        .build();
+    button.update_property(&[gtk::accessible::Property::Label(tooltip)]);
+    button
 }
 
 /// The book of `config`'s accounts over this window's transport.

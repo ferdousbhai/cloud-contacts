@@ -7,7 +7,7 @@ case "$architecture" in x86_64|aarch64) ;; *) echo "Unsupported architecture: $a
 [[ $(uname -m) == "$architecture" ]] || { echo 'A native runner is required.' >&2; exit 1; }
 if (( EUID == 0 )); then
   [[ ${CLOUD_CONTACTS_ARCH_ROOT:-} == 1 ]] || { echo 'Run as a regular Arch user, or through bin/arch-run.' >&2; exit 1; }
-  pacman -S --needed --noconfirm base-devel cargo git gtk4 libadwaita
+  pacman -S --needed --noconfirm base-devel cargo git gtk4
   exec runuser -u builder -- "$PWD/bin/build-package" "$@"
 fi
 for tool in makepkg cargo bsdtar; do

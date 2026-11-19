@@ -1,7 +1,7 @@
 # Cloud Contacts
 
 Your iCloud and Google contacts side by side on [Omarchy](https://omarchy.org) (and any Arch
-Linux): a GTK4/libadwaita window and a command line for scripts and AI agents. Search, call,
+Linux): a GTK 4 window themed by Omarchy and a command line for scripts and AI agents. Search, call,
 email, add, edit, delete and export as vCard, in either account.
 
 Each contact lives in one account, and a change goes to that account alone: the window shows
@@ -131,10 +131,10 @@ install` installs the agent skill.
 ## From source
 
 ```sh
-cargo build --release        # needs gtk4 and libadwaita for the window
+cargo build --release        # needs gtk4 for the window
 target/release/cloud-contacts --help
 ```
 
 ## License
 
-MIT. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+MIT. See [LICENSE](LICENSE), [NOTICE](NOTICE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

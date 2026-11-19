@@ -11,12 +11,12 @@ repository = "https://github.com/ferdousbhai/cloud-contacts"
 [workspace.dependencies]
 # What every iCloud app on this machine shares, from icloud-for-omarchy, pinned by commit:
 # icloud-session (the one web sign-in icloud-sessiond holds), icloud-app (the command lines'
-# helpers, an app's data directory and JSON files) and icloud-app-ui (the sign-in banner and the
-# window's main).
-icloud-session = { git = "https://github.com/ferdousbhai/icloud-for-omarchy", rev = "393ec0632742cfcb24492594f709069d1e52ebc2", features = ["clap"] }
-icloud-app = { git = "https://github.com/ferdousbhai/icloud-for-omarchy", rev = "393ec0632742cfcb24492594f709069d1e52ebc2" }
-icloud-app-ui = { git = "https://github.com/ferdousbhai/icloud-for-omarchy", rev = "393ec0632742cfcb24492594f709069d1e52ebc2" }
-adw = { package = "libadwaita", version = "0.9", features = ["v1_9"] }
+# helpers, an app's data directory and JSON files) and icloud-app-ui (the sign-in banner).
+icloud-session = { git = "https://github.com/ferdousbhai/icloud-for-omarchy", rev = "708ee712ca5e3d54e521101baaa8ca32fb5c3071", features = ["clap"] }
+icloud-app = { git = "https://github.com/ferdousbhai/icloud-for-omarchy", rev = "708ee712ca5e3d54e521101baaa8ca32fb5c3071" }
+icloud-app-ui = { git = "https://github.com/ferdousbhai/icloud-for-omarchy", rev = "708ee712ca5e3d54e521101baaa8ca32fb5c3071" }
+# The window's look, theme and widgets, which the Omarchy apps share; no libadwaita.
+omui = { git = "https://github.com/ferdousbhai/omui", rev = "9f44a496ca98922b8e6e65e9491bcaa0cd1ca4a5" } # v0.3.1
 gtk = { package = "gtk4", version = "0.11", features = ["v4_22"] }
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
