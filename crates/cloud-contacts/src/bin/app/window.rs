@@ -1540,9 +1540,9 @@ fn build(app: &gtk::Application, banner: SignInBanner) -> Window {
     let main_menu = gio::Menu::new();
     main_menu.append(Some("Refresh"), Some("win.refresh"));
     main_menu.append(Some("Duplicates…"), Some("win.duplicates"));
-    sidebar_header.pack_start(&menu_button(name::MENU, "Main Menu", &main_menu));
+    sidebar_header.pack_start(&omui::icon_menu_button(name::MENU, "Main Menu", &main_menu));
     let accounts_menu = gio::Menu::new();
-    sidebar_header.pack_end(&menu_button(name::USERS, "Accounts", &accounts_menu));
+    sidebar_header.pack_end(&omui::icon_menu_button(name::USERS, "Accounts", &accounts_menu));
     let new = omui::icon_button(name::ADD, "New Contact (Ctrl+N)");
     new.set_action_name(Some("win.new"));
     sidebar_header.pack_end(&new);
@@ -1732,18 +1732,6 @@ fn build(app: &gtk::Application, banner: SignInBanner) -> Window {
         ks_quiet: Cell::new(false),
         dup_offer,
     }
-}
-
-/// A header bar's button that opens `menu`, drawn as omui's icon buttons are.
-fn menu_button(icon: &str, tooltip: &str, menu: &gio::Menu) -> gtk::MenuButton {
-    let button = gtk::MenuButton::builder()
-        .icon_name(icon)
-        .tooltip_text(tooltip)
-        .has_frame(false)
-        .menu_model(menu)
-        .build();
-    button.update_property(&[gtk::accessible::Property::Label(tooltip)]);
-    button
 }
 
 /// The book of `config`'s accounts over this window's transport.
