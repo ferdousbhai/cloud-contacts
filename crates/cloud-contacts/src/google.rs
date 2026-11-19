@@ -34,13 +34,14 @@ use crate::model::{Change, Contact};
 use crate::store::{Cache, Store};
 
 pub const COMMAND_ENV: &str = "CLOUD_CONTACTS_GWS_COMMAND";
-/// The Google OAuth client to sign in with: a "Desktop app" client with the
-/// People API on, whose secret Google treats as public. It is not in the
-/// source: a release build takes it from the build's environment
-/// (`CLOUD_CONTACTS_GOOGLE_CLIENT_ID` / `_SECRET`), and the same variables at
-/// run time, both set, use another client instead.
-pub const GOOGLE_CLIENT_ID: Option<&str> = option_env!("CLOUD_CONTACTS_GOOGLE_CLIENT_ID");
-pub const GOOGLE_CLIENT_SECRET: Option<&str> = option_env!("CLOUD_CONTACTS_GOOGLE_CLIENT_SECRET");
+/// The Google OAuth client to sign in with: Cloud Calendar's "Desktop app"
+/// client (the People API is on in its project), whose secret Google treats
+/// as public, so it ships in the binary as Cloud Calendar's and Cloudmail's
+/// do. `CLOUD_CONTACTS_GOOGLE_CLIENT_ID` / `_SECRET` at run time, both set,
+/// use another client instead.
+pub const GOOGLE_CLIENT_ID: Option<&str> =
+    Some("858534886670-37fmq8bl312beufkc420h9nvtjrb4l0d.apps.googleusercontent.com");
+pub const GOOGLE_CLIENT_SECRET: Option<&str> = Some("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");
 pub const CLIENT_ID_ENV: &str = "CLOUD_CONTACTS_GOOGLE_CLIENT_ID";
 pub const CLIENT_SECRET_ENV: &str = "CLOUD_CONTACTS_GOOGLE_CLIENT_SECRET";
 /// The program that opens the sign-in link (default: xdg-open).

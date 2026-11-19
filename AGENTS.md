@@ -66,9 +66,9 @@ desktop; use a Broadway display of your own (`gtk4-broadwayd :NN`, an unusual nu
   go to `meta.warnings`. Destructive commands take `--yes`. New commands go in the skill too.
 - A new kind of account implements `Provider`, prefixes nothing itself (the book does) and is
   added to `book::open_account`, `config::PROVIDERS` and `accounts`.
-- Google's OAuth client is not in the source (GitHub push protection refuses it): a release
-  build takes it from `CLOUD_CONTACTS_GOOGLE_CLIENT_ID` / `_SECRET` in the build environment
-  (`option_env!` in `google.rs`); without them gws signs in with the client it is set up with.
+- Google's OAuth client is Cloud Calendar's Desktop-app client, in `google.rs` (its secret is
+  public by Google's rules for installed apps; the People API is on in its project).
+  `CLOUD_CONTACTS_GOOGLE_CLIENT_ID` / `_SECRET` at run time, both set, use another.
 - Release: bump `version` in the root `Cargo.toml` and `pkgver` in the PKGBUILD together, tag
   `vX.Y.Z`, push the tag (CI builds both architectures), draft the GitHub release, then
   `bin/release X.Y.Z` (signs with the maintainer key, never CI). Do not release unless asked.
