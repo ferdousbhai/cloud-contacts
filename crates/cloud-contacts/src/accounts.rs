@@ -165,7 +165,7 @@ pub fn remove(name: &str, root: &Path) -> Result<String> {
     }
     let _ = std::fs::remove_dir_all(root.join(name));
     if matches!(cfg.provider(name), "icloud" | "google")
-        && let Some(off) = crate::keep_same::account_removed(root)
+        && let Some(off) = crate::mirror::account_removed(root)
     {
         note.push_str(&format!("; {off}"));
     }

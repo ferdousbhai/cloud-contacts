@@ -1,12 +1,13 @@
-//! Keeping iCloud and Google contacts the same: opt-in, and only with one
+//! Mirroring contacts between iCloud and Google: opt-in, and only with one
 //! iCloud and one Google account linked. A contact added, changed or deleted
 //! in one is added, changed or deleted in the other.
 //!
-//! State, in `<data>/keep-same.json` under a lock (`keep-same.lock`):
+//! State, in `<data>/mirror.json` under a lock (`mirror.lock`; Cloud Contacts
+//! 0.4.0 and 0.4.1 called it `keep-same.json`, moved on the first load):
 //!
 //! - `links`: which iCloud contact is which Google contact, each with `base`,
 //!   the fields both model (see [`Shared`]) as they were when the two were
-//!   last made the same: the merge base.
+//!   last mirrored: the merge base.
 //! - `pending`: a copy being made, recorded before it is written, so a run
 //!   killed after the write but before the link is saved finds the copy and
 //!   links it instead of copying again.
@@ -368,7 +369,7 @@ fn later(i: &Contact, g: &Contact) -> Later {
 pub struct Link {
     pub icloud: String,
     pub google: String,
-    /// As both were when last made the same; none right after pairing.
+    /// As both were when last mirrored; none right after pairing.
     #[serde(default)]
     pub base: Option<Shared>,
 }
@@ -424,11 +425,28 @@ pub struct State {
 }
 
 pub fn state_path(root: &Path) -> PathBuf {
-    root.join("keep-same.json")
+    root.join("mirror.json")
 }
 
 pub fn load(root: &Path) -> Result<State> {
+    moved_from_keep_same(root)?;
     Ok(icloud_app::store::read_json(&state_path(root))?.unwrap_or_default())
+}
+
+/// Cloud Contacts 0.4.0 and 0.4.1 kept the state as `keep-same.json`: it
+/// becomes `mirror.json`, links and all. A rename, made only while
+/// `mirror.json` is not there: of two processes at it, the second finds the
+/// old file gone, so the state is never replaced (and no lock is needed,
+/// which `load` could not take inside `update`'s).
+fn moved_from_keep_same(root: &Path) -> Result<()> {
+    let new = state_path(root);
+    if new.exists() {
+        return Ok(());
+    }
+    match std::fs::rename(root.join("keep-same.json"), &new) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(Error::from(e)),
+        _ => Ok(()),
+    }
 }
 
 fn save(root: &Path, s: &State) -> Result<()> {
@@ -437,7 +455,7 @@ fn save(root: &Path, s: &State) -> Result<()> {
 
 /// Changes the state under its lock.
 pub fn update<T>(root: &Path, f: impl FnOnce(&mut State) -> Result<T>) -> Result<T> {
-    let _lock = icloud_app::store::lock(root, "keep-same.lock")?;
+    let _lock = icloud_app::store::lock(root, "mirror.lock")?;
     let mut s = load(root)?;
     let out = f(&mut s)?;
     save(root, &s)?;
@@ -493,7 +511,7 @@ fn similar_name(a: &Contact, b: &Contact) -> bool {
     !x.is_empty() && !y.is_empty() && (x == y || x.contains(&y) || y.contains(&x))
 }
 
-/// Contacts already in both accounts, when keep-same is turned on: certain
+/// Contacts already in both accounts, when mirroring is turned on: certain
 /// pairs (a shared email or phone and alike names, and no other candidate
 /// for either), and doubtful ones for the person.
 pub fn pairing(icloud: &[Contact], google: &[Contact], state: &State) -> (Vec<Pair>, Vec<Pair>) {
@@ -581,7 +599,7 @@ impl std::fmt::Display for RunError {
             RunError::Account(Side::Google, e) => write!(f, "Google could not be read, so nothing changed: {e}"),
             RunError::TooManyDeletions(d) => write!(
                 f,
-                "this run would delete {} contacts, more than keep-same deletes without asking; nothing changed",
+                "this run would delete {} contacts, more than mirroring deletes without asking; nothing changed",
                 d.len()
             ),
             RunError::Other(e) => write!(f, "{e}"),
@@ -651,7 +669,7 @@ impl<'a> Engine<'a> {
     /// than a run makes by itself. A failure is recorded as the state's
     /// problem.
     pub fn run(&mut self, yes: bool) -> std::result::Result<Report, RunError> {
-        let _lock = icloud_app::store::lock(self.root, "keep-same.lock").map_err(Error::from)?;
+        let _lock = icloud_app::store::lock(self.root, "mirror.lock").map_err(Error::from)?;
         let result = self.run_locked(yes);
         let mut s = load(self.root)?;
         match &result {
@@ -940,7 +958,7 @@ pub fn turn_off(root: &Path) -> Result<bool> {
     update(root, |s| Ok(std::mem::replace(&mut s.on, false)))
 }
 
-/// The two accounts kept the same, from the linked ones.
+/// The two accounts mirrored, from the linked ones.
 pub enum Pairing<'a> {
     /// No account of this provider ("icloud" or "google") is linked.
     Missing(&'static str),
@@ -957,7 +975,7 @@ pub fn pairing_of(book: &crate::book::Book) -> Pairing<'_> {
         (_, []) => Pairing::Missing("google"),
         ([i], [g]) => Pairing::Ready(i, g),
         (_, many) => Pairing::Ambiguous(format!(
-            "keeping contacts the same pairs one iCloud and one Google account, and {} Google accounts are linked ({})",
+            "mirroring pairs one iCloud and one Google account, and {} Google accounts are linked ({})",
             many.len(),
             many.iter().map(|a| a.name.as_str()).collect::<Vec<_>>().join(", ")
         )),
@@ -965,13 +983,22 @@ pub fn pairing_of(book: &crate::book::Book) -> Pairing<'_> {
 }
 
 /// The systemd user timer that runs it every few minutes.
-pub const TIMER: &str = "cloud-contacts-keep-same.timer";
+pub const TIMER: &str = "cloud-contacts-mirror.timer";
+/// What 0.4.0 and 0.4.1 called the timer: turned off with the new one.
+pub const OLD_TIMER: &str = "cloud-contacts-keep-same.timer";
 
 /// Starts or stops the timer (`systemctl --user`, or
 /// `CLOUD_CONTACTS_SYSTEMCTL`); a failure is a warning: it is on either way,
-/// and `keep-same run` runs it.
+/// and `mirror run` runs it.
 pub fn timer(on: bool) -> Option<String> {
     let systemctl = std::env::var("CLOUD_CONTACTS_SYSTEMCTL").unwrap_or_else(|_| "systemctl".into());
+    // 0.4.0 and 0.4.1's timer, if it was ever turned on: off, whatever comes of it
+    _ = std::process::Command::new(&systemctl)
+        .args(["--user", "disable", "--now", OLD_TIMER])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
     let verb = if on { "enable" } else { "disable" };
     let out = std::process::Command::new(&systemctl)
         .args(["--user", verb, "--now", TIMER])
@@ -987,7 +1014,7 @@ pub fn timer(on: bool) -> Option<String> {
     }
 }
 
-/// An iCloud or Google account was unlinked: keeping them the same stops
+/// An iCloud or Google account was unlinked: mirroring stops
 /// (both sides' contacts stay as they are, and the links are kept for a
 /// later turn on). Answers what to tell the person, when it was on.
 pub fn account_removed(root: &Path) -> Option<String> {
@@ -995,15 +1022,14 @@ pub fn account_removed(root: &Path) -> Option<String> {
     if !was_on {
         return None;
     }
-    let mut note =
-        "keeping iCloud and Google contacts the same is off now; both keep their contacts as they are".to_string();
+    let mut note = "mirroring iCloud and Google contacts is off now; both keep their contacts as they are".to_string();
     if let Some(w) = timer(false) {
         note.push_str(&format!(" ({w})"));
     }
     Some(note)
 }
 
-/// The status `keep-same` and `status` show.
+/// The status `mirror` and `status` show.
 pub fn status_json(s: &State) -> Value {
     json!({
         "on": s.on,
@@ -1015,7 +1041,7 @@ pub fn status_json(s: &State) -> Value {
     })
 }
 
-/// What the window shows about keep-same, decided from what is linked and
+/// What the window shows about mirroring, decided from what is linked and
 /// the state: nothing without both an iCloud and a Google account.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Shown {
@@ -1049,7 +1075,7 @@ pub fn shown(accounts: &[(String, bool)], s: &State, ago: impl Fn(u64) -> String
         }
     } else {
         match s.last_run {
-            Some(t) => format!("On · last made the same {}", ago(t)),
+            Some(t) => format!("On · last mirrored {}", ago(t)),
             None => "On".to_string(),
         }
     };
@@ -1207,7 +1233,7 @@ mod tests {
             shown(&both, &on, ago),
             Shown::Switch {
                 on: true,
-                line: "On · last made the same now".into(),
+                line: "On · last mirrored now".into(),
                 offer: false
             }
         );

@@ -1,0 +1,12 @@
+[Unit]
+Description=Mirror contacts between iCloud and Google, every few minutes
+Documentation=https://github.com/ferdousbhai/cloud-contacts#mirroring-icloud-and-google
+
+# Enabled by `cloud-contacts mirror on` (and the window's switch), disabled by off.
+[Timer]
+OnStartupSec=2min
+OnUnitInactiveSec=5min
+Persistent=false
+
+[Install]
+WantedBy=timers.target

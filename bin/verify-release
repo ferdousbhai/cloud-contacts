@@ -19,5 +19,5 @@ exec bin/arch-run env EXPECTED_VERSION="$version" EXPECTED_ARCH="$arch" \
     ldd /usr/bin/cloud-contacts-app > /tmp/gtk-libraries
     ! grep -q "not found" /tmp/gtk-libraries
     test -f /usr/share/applications/com.ferdousbhai.cloudcontacts.desktop
-    test -f /usr/lib/systemd/user/cloud-contacts-keep-same.timer
+    test -f /usr/lib/systemd/user/cloud-contacts-mirror.timer
   '

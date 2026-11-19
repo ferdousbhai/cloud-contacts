@@ -21,7 +21,7 @@ use cloud_contacts::config;
 use cloud_contacts::draft::{Draft, Row, SCALARS, typed};
 use cloud_contacts::error::Error;
 use cloud_contacts::icloud::api::SessionTransport;
-use cloud_contacts::keep_same;
+use cloud_contacts::mirror;
 use cloud_contacts::model::{self, Field, Multi};
 use cloud_contacts::store::Store;
 use icloud_app_ui::{SignInBanner, background};
@@ -55,7 +55,7 @@ pub struct Window {
     visible: RefCell<Option<HashSet<String>>>,
     syncing: Cell<bool>,
     last_error: RefCell<Option<String>>,
-    /// Keeping iCloud and Google the same: the offer above the contacts,
+    /// Mirroring iCloud and Google: the offer above the contacts,
     /// and the switch with its status line below the sidebar. Neither shows
     /// without both an iCloud and a Google account.
     ks_offer: gtk::Revealer,
@@ -193,14 +193,14 @@ impl Window {
                 this.confirm_delete(c);
             }
         });
-        action("keep-same-review", |this| this.keep_same_review());
-        action("keep-same-not-now", |this| {
+        action("mirror-review", |this| this.mirror_review());
+        action("mirror-not-now", |this| {
             let root = this.root.clone();
             this.ks_offer.set_reveal_child(false);
             background(
                 move || {
                     root.map(|r| {
-                        keep_same::update(&r, |s| {
+                        mirror::update(&r, |s| {
                             s.offer_declined = true;
                             Ok(())
                         })
@@ -218,9 +218,9 @@ impl Window {
             if row.is_active() {
                 // on only through the review; the switch shows the outcome
                 this.set_switch(false);
-                this.keep_same_review();
+                this.mirror_review();
             } else {
-                this.keep_same_off();
+                this.mirror_off();
             }
         });
         action("add-icloud", |this| this.link("icloud"));
@@ -448,7 +448,7 @@ impl Window {
                         }
                         this.set_accounts(accounts);
                         this.show_warnings(&shown);
-                        this.show_keep_same();
+                        this.show_mirror();
                         // Most fetches change nothing: the rows stay.
                         let changed = *this.shown.borrow() != shown;
                         *this.shown.borrow_mut() = shown;
@@ -516,7 +516,7 @@ impl Window {
                         }
                         done(&this, out);
                         this.show_list();
-                        this.keep_same_run();
+                        this.mirror_run();
                         return;
                     }
                     Ok(Err(e)) if e.is_icloud_sign_in() => {
@@ -541,9 +541,9 @@ impl Window {
         self.ks_quiet.set(false);
     }
 
-    /// Shows keep-same's offer, switch and status line as the linked
-    /// accounts and its state say (`keep_same::shown`).
-    fn show_keep_same(self: &Rc<Self>) {
+    /// Shows mirroring's offer, switch and status line as the linked
+    /// accounts and its state say (`mirror::shown`).
+    fn show_mirror(self: &Rc<Self>) {
         let root = self.root.clone();
         let weak = Rc::downgrade(self);
         background(
@@ -554,13 +554,13 @@ impl Window {
                     .into_iter()
                     .map(|a| (a.provider, a.signed_in))
                     .collect();
-                let st = keep_same::load(&root).unwrap_or_default();
-                Some(keep_same::shown(&accounts, &st, cloud_contacts::cli::ago))
+                let st = mirror::load(&root).unwrap_or_default();
+                Some(mirror::shown(&accounts, &st, cloud_contacts::cli::ago))
             },
             move |result| {
                 let Some(this) = weak.upgrade() else { return };
                 match result.ok().flatten() {
-                    Some(keep_same::Shown::Switch { on, line, offer }) => {
+                    Some(mirror::Shown::Switch { on, line, offer }) => {
                         this.ks_row.set_visible(true);
                         this.set_switch(on);
                         this.ks_row.set_subtitle(&line);
@@ -578,7 +578,7 @@ impl Window {
     /// Right after the second kind of account is linked.
     fn offer_after_link(self: &Rc<Self>) {
         let dialog = adw::AlertDialog::new(
-            Some("Keep iCloud and Google Contacts the Same?"),
+            Some("Mirror Contacts Between iCloud and Google?"),
             Some(
                 "A contact added, changed or deleted in one would be in the other too. You can turn this on later below the contacts.",
             ),
@@ -590,7 +590,7 @@ impl Window {
         let weak = Rc::downgrade(self);
         dialog.connect_response(Some("on"), move |_, _| {
             if let Some(this) = weak.upgrade() {
-                this.keep_same_review();
+                this.mirror_review();
             }
         });
         dialog.present(Some(&self.window));
@@ -605,17 +605,17 @@ impl Window {
 
     /// Turn On…: what turning on would do, with the doubtful pairs for the
     /// person to call, then on.
-    fn keep_same_review(self: &Rc<Self>) {
+    fn mirror_review(self: &Rc<Self>) {
         let (t, root) = (self.transport.clone(), self.root.clone());
         let weak = Rc::downgrade(self);
         self.toast("Looking at both accounts…");
         background(
-            move || -> Result<(keep_same::Plan, Vec<(String, String)>), String> {
+            move || -> Result<(mirror::Plan, Vec<(String, String)>), String> {
                 let (root, book) = Self::pair_book(root, t).map_err(|e| e.to_string())?;
-                let keep_same::Pairing::Ready(i, g) = keep_same::pairing_of(&book) else {
-                    return Err("keeping contacts the same needs an iCloud and a Google account".into());
+                let mirror::Pairing::Ready(i, g) = mirror::pairing_of(&book) else {
+                    return Err("mirroring contacts needs an iCloud and a Google account".into());
                 };
-                let engine = keep_same::Engine::new(&root, &*i.provider_impl, &*g.provider_impl);
+                let engine = mirror::Engine::new(&root, &*i.provider_impl, &*g.provider_impl);
                 let plan = engine.plan().map_err(|e| e.to_string())?;
                 // names for the doubtful pairs
                 let shown = book.read(None, true).map_err(|e| e.to_string())?;
@@ -642,7 +642,7 @@ impl Window {
         );
     }
 
-    fn review_dialog(self: &Rc<Self>, plan: keep_same::Plan, names: Vec<(String, String)>) {
+    fn review_dialog(self: &Rc<Self>, plan: mirror::Plan, names: Vec<(String, String)>) {
         let body = gtk::Box::new(gtk::Orientation::Vertical, 12);
         let summary = format!(
             "{} contacts in both accounts will be joined. {} will be copied to Google and {} to iCloud. From then on, a contact added, changed or deleted in one is in the other too, while this computer is on. Photos and Google's groups stay where they are.",
@@ -684,7 +684,7 @@ impl Window {
                     .build(),
             );
         }
-        let dialog = adw::AlertDialog::new(Some("Keep iCloud and Google Contacts the Same"), None);
+        let dialog = adw::AlertDialog::new(Some("Mirror Contacts Between iCloud and Google"), None);
         dialog.set_extra_child(Some(&body));
         dialog.add_responses(&[("cancel", "_Cancel"), ("on", "_Turn On")]);
         dialog.set_response_appearance("on", adw::ResponseAppearance::Suggested);
@@ -693,12 +693,12 @@ impl Window {
         let weak = Rc::downgrade(self);
         dialog.connect_response(Some("on"), move |_, _| {
             let Some(this) = weak.upgrade() else { return };
-            let decisions: Vec<(String, String, keep_same::Decision)> = choices
+            let decisions: Vec<(String, String, mirror::Decision)> = choices
                 .iter()
                 .filter_map(|(p, row)| {
                     let d = match row.selected() {
-                        1 => keep_same::Decision::Same,
-                        2 => keep_same::Decision::Different,
+                        1 => mirror::Decision::Same,
+                        2 => mirror::Decision::Different,
                         _ => return None,
                     };
                     Some((p.icloud.clone(), p.google.clone(), d))
@@ -709,14 +709,14 @@ impl Window {
             background(
                 move || -> Result<String, String> {
                     let (root, book) = Self::pair_book(root, t).map_err(|e| e.to_string())?;
-                    keep_same::turn_on(&root, &plan, &decisions).map_err(|e| e.to_string())?;
-                    let warning = keep_same::timer(true);
-                    let keep_same::Pairing::Ready(i, g) = keep_same::pairing_of(&book) else {
+                    mirror::turn_on(&root, &plan, &decisions).map_err(|e| e.to_string())?;
+                    let warning = mirror::timer(true);
+                    let mirror::Pairing::Ready(i, g) = mirror::pairing_of(&book) else {
                         return Err("an account went away".into());
                     };
-                    let mut engine = keep_same::Engine::new(&root, &*i.provider_impl, &*g.provider_impl);
+                    let mut engine = mirror::Engine::new(&root, &*i.provider_impl, &*g.provider_impl);
                     let done = match engine.run(false) {
-                        Ok(_) => "iCloud and Google contacts are kept the same now".to_string(),
+                        Ok(_) => "iCloud and Google contacts are mirrored now".to_string(),
                         Err(e) => e.to_string(),
                     };
                     Ok(warning.map_or(done.clone(), |w| format!("{done} ({w})")))
@@ -734,15 +734,15 @@ impl Window {
         dialog.present(Some(&self.window));
     }
 
-    fn keep_same_off(self: &Rc<Self>) {
+    fn mirror_off(self: &Rc<Self>) {
         let root = self.root.clone();
         let weak = Rc::downgrade(self);
         background(
             move || -> Option<String> {
                 let root = root?;
-                keep_same::turn_off(&root).ok()?;
+                mirror::turn_off(&root).ok()?;
                 Some(
-                    keep_same::timer(false)
+                    mirror::timer(false)
                         .unwrap_or_else(|| "Turned off: both accounts keep their contacts as they are".into()),
                 )
             },
@@ -751,25 +751,25 @@ impl Window {
                 if let Ok(Some(note)) = result {
                     this.toast(&note);
                 }
-                this.show_keep_same();
+                this.show_mirror();
             },
         );
     }
 
     /// A run now (after a change made here), when it is on.
-    fn keep_same_run(self: &Rc<Self>) {
+    fn mirror_run(self: &Rc<Self>) {
         let (t, root) = (self.transport.clone(), self.root.clone());
         let weak = Rc::downgrade(self);
         background(
             move || {
                 let (root, book) = Self::pair_book(root, t).ok()?;
-                if !keep_same::load(&root).ok()?.on {
+                if !mirror::load(&root).ok()?.on {
                     return None;
                 }
-                let keep_same::Pairing::Ready(i, g) = keep_same::pairing_of(&book) else {
+                let mirror::Pairing::Ready(i, g) = mirror::pairing_of(&book) else {
                     return None;
                 };
-                let mut engine = keep_same::Engine::new(&root, &*i.provider_impl, &*g.provider_impl);
+                let mut engine = mirror::Engine::new(&root, &*i.provider_impl, &*g.provider_impl);
                 Some(engine.run(false).map(drop).map_err(|e| e.to_string()))
             },
             move |result| {
@@ -777,7 +777,7 @@ impl Window {
                 if let Ok(Some(Err(e))) = result {
                     this.error(&e);
                 }
-                this.show_keep_same();
+                this.show_mirror();
             },
         );
     }
@@ -1336,7 +1336,7 @@ fn build(app: &adw::Application, banner: SignInBanner) -> Window {
     sidebar_body.append(&search);
     sidebar_body.append(&gtk::ScrolledWindow::builder().child(&list).vexpand(true).build());
     let ks_row = adw::SwitchRow::builder()
-        .title("Keep iCloud and Google contacts the same")
+        .title("Mirror contacts between iCloud and Google")
         .subtitle("Off")
         .visible(false)
         .build();
@@ -1422,7 +1422,7 @@ fn build(app: &adw::Application, banner: SignInBanner) -> Window {
         .build();
     offer.append(
         &gtk::Label::builder()
-            .label("Your iCloud and Google contacts are separate. Keep them the same?")
+            .label("Your iCloud and Google contacts are separate. Mirror them?")
             .hexpand(true)
             .xalign(0.0)
             .wrap(true)
@@ -1431,13 +1431,13 @@ fn build(app: &adw::Application, banner: SignInBanner) -> Window {
     offer.append(
         &gtk::Button::builder()
             .label("Not Now")
-            .action_name("win.keep-same-not-now")
+            .action_name("win.mirror-not-now")
             .build(),
     );
     offer.append(
         &gtk::Button::builder()
             .label("Turn On…")
-            .action_name("win.keep-same-review")
+            .action_name("win.mirror-review")
             .css_classes(["suggested-action"])
             .build(),
     );

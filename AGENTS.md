@@ -2,7 +2,7 @@
 
 Your iCloud and Google contacts side by side on Omarchy/Arch: a GTK4/libadwaita window and an
 agent-friendly CLI, in Rust. Each contact lives in one account and a change goes to that account
-alone; accounts are not copied into each other unless the person turns on keep-same. Sibling of Cloud Calendar and Cloudmail.
+alone; accounts are not copied into each other unless the person turns on mirroring. Sibling of Cloud Calendar and Cloudmail.
 
 This file is for working on the code. For *using* the CLI as an agent, read
 `skills/cloud-contacts/SKILL.md` (embedded in the binary: `cloud-contacts skill [install]`).
@@ -27,11 +27,11 @@ One crate, `crates/cloud-contacts`:
 - `src/config.rs` — `~/.config/cloud-contacts/config.toml` and the first run (Cloud Contacts
   0.3's `config.json`, or the iCloud account when icloud-session is signed in);
   `src/accounts.rs` — link, sign in again, unlink, status.
-- `src/keep_same.rs` — keeping iCloud and Google the same (opt-in): the shared fields
+- `src/mirror.rs` — mirroring iCloud and Google (opt-in): the shared fields
   (`Shared`), the three-way merge, pairing and duplicates, the crash-safe run (`Engine`, read its
-  header first), the state in `<data>/keep-same.json`, and what the window shows (`shown`).
-  `packaging/systemd/cloud-contacts-keep-same.{service,timer}` run it; `keep-same on` enables the
-  timer (`CLOUD_CONTACTS_SYSTEMCTL` in tests). `tests/keep_same.rs`: two in-memory accounts,
+  header first), the state in `<data>/mirror.json` (0.4.0–0.4.1's `keep-same.json` is moved on load), and what the window shows (`shown`).
+  `packaging/systemd/cloud-contacts-mirror.{service,timer}` run it; `mirror on` enables the
+  timer and disables 0.4.0–0.4.1's `cloud-contacts-keep-same.timer` (`CLOUD_CONTACTS_SYSTEMCTL` in tests). `tests/mirror.rs`: two in-memory accounts,
   every merge rule and guard, a run killed after each write, random sequences that must converge.
 - `src/cli.rs` — the command line; `src/main.rs` its GTK-free binary; `src/bin/app/` the window
   (`cloud-contacts-app`, feature `ui`). `src/agent_skill.rs` is a shared copy (SHARED_SUPPORT.md).

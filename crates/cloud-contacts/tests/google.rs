@@ -53,7 +53,7 @@ fn start() -> Env {
     env.ok(&["status"]);
     let added = env.json(&["account", "add", "google"]);
     assert_eq!(added["account"], "google");
-    assert_eq!(added["hint"], "keep them the same with `cloud-contacts keep-same on`");
+    assert_eq!(added["hint"], "mirror them with `cloud-contacts mirror on`");
     env
 }
 
@@ -313,39 +313,65 @@ fn unlinking_google_forgets_its_sign_in_not_its_contacts() {
 }
 
 #[test]
-fn keep_same_needs_both_accounts() {
+fn mirror_needs_both_accounts() {
     let env = start();
     env.ok(&["account", "remove", "google", "--yes"]);
-    let (exit, e) = env.fails(&["keep-same"]);
+    let (exit, e) = env.fails(&["mirror"]);
     assert_eq!((exit, e["code"].as_str()), (3, Some("needs_both_accounts")));
-    assert_eq!(
-        e["message"],
-        "keeping contacts the same needs an iCloud and a Google account"
-    );
+    assert_eq!(e["message"], "mirroring contacts needs an iCloud and a Google account");
     assert_eq!(
         e["hint"],
         "link the Google one with `cloud-contacts account add google`"
     );
-    assert!(env.json(&["status"]).get("keep_same").is_none());
+    assert!(env.json(&["status"]).get("mirror").is_none());
     let help = String::from_utf8_lossy(&env.run(&["--help"]).stdout).into_owned();
     assert!(
-        help.contains("keep-same") && help.contains("(needs an iCloud and a Google account)"),
+        help.contains("mirror")
+            && !help.contains("keep-same")
+            && help.contains("(needs an iCloud and a Google account)"),
         "{help}"
     );
 }
 
+/// 0.4.0 and 0.4.1 called it keep-same: the old name still works for now,
+/// and turning mirroring on also turns their timer off.
 #[test]
-fn keep_same_on_copies_both_ways_and_holds_doubts() {
+fn keep_same_is_the_old_name_of_mirror() {
+    use std::os::unix::fs::PermissionsExt;
     let env = start();
-    let st = env.json(&["keep-same"]);
+    let log = env.dir.path().join("systemctl.log");
+    let fake = env.dir.path().join("systemctl");
+    std::fs::write(&fake, format!("#!/bin/sh\necho \"$*\" >> '{}'\n", log.display())).unwrap();
+    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let out = env.run_with(
+        &["keep-same", "on", "--yes"],
+        &[("CLOUD_CONTACTS_SYSTEMCTL", fake.to_str().unwrap())],
+    );
+    assert_eq!(code(&out), 0, "{} {}", stdout(&out), stderr(&out));
+    assert_eq!(env.json(&["mirror"])["on"], true);
+    let calls = std::fs::read_to_string(&log).unwrap();
+    assert!(
+        calls.contains("--user disable --now cloud-contacts-keep-same.timer"),
+        "{calls}"
+    );
+    assert!(
+        calls.contains("--user enable --now cloud-contacts-mirror.timer"),
+        "{calls}"
+    );
+}
+
+#[test]
+fn mirror_on_copies_both_ways_and_holds_doubts() {
+    let env = start();
+    let st = env.json(&["mirror"]);
     assert_eq!((st["on"].as_bool(), st["linked"].as_u64()), (Some(false), Some(0)));
-    assert_eq!(env.json(&["status"])["keep_same"]["on"], false);
+    assert_eq!(env.json(&["status"])["mirror"]["on"], false);
     // it asks first
-    let (exit, e) = env.fails(&["keep-same", "on"]);
+    let (exit, e) = env.fails(&["mirror", "on"]);
     assert_eq!((exit, e["code"].as_str()), (2, Some("usage")));
     assert!(env.google()["people"].as_object().unwrap().len() == 2, "nothing copied");
 
-    let on = env.json(&["keep-same", "on", "--yes"]);
+    let on = env.json(&["mirror", "on", "--yes"]);
     assert_eq!(on["on"], true);
     // the two Ann Lees share only a name: they wait for the person
     assert_eq!(on["plan"]["doubtful"].as_array().unwrap().len(), 1);
@@ -370,18 +396,18 @@ fn keep_same_on_copies_both_ways_and_holds_doubts() {
 
     // an edit in Google crosses on the next run
     env.ok(&["edit", "google:people/c1", "--job-title", "Pilot"]);
-    let run = env.json(&["keep-same", "run"]);
+    let run = env.json(&["mirror", "run"]);
     assert_eq!(run["report"]["changed"], 1);
     let gus_icloud = env.json(&["list", "Gus", "--account", "icloud", "--cached"]);
     assert_eq!(gus_icloud[0]["job_title"], "Pilot");
 
     // the doubtful pair called one person: linked, not copied
-    let waiting = env.json(&["keep-same"])["waiting"][0].clone();
+    let waiting = env.json(&["mirror"])["waiting"][0].clone();
     let i = format!("icloud:{}", waiting["icloud"].as_str().unwrap());
     let g = format!("google:{}", waiting["google"].as_str().unwrap());
-    let st = env.json(&["keep-same", "pair", &i, &g]);
+    let st = env.json(&["mirror", "pair", &i, &g]);
     assert_eq!(st["waiting"], json!([]));
-    env.ok(&["keep-same", "run"]);
+    env.ok(&["mirror", "run"]);
     let anns = env.json(&["list", "ann lee", "--cached"]);
     assert_eq!(anns.as_array().unwrap().len(), 2, "one in each account");
     assert_eq!(anns[0]["company"], anns[1]["company"]);
@@ -392,7 +418,7 @@ fn keep_same_on_copies_both_ways_and_holds_doubts() {
         out["note"]
             .as_str()
             .unwrap()
-            .contains("keeping iCloud and Google contacts the same is off now"),
+            .contains("mirroring iCloud and Google contacts is off now"),
         "{out}"
     );
 }

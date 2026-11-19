@@ -1,0 +1,12 @@
+[Unit]
+Description=Mirror contacts between iCloud and Google (cloud-contacts mirror run)
+Documentation=https://github.com/ferdousbhai/cloud-contacts#mirroring-icloud-and-google
+
+[Service]
+Type=oneshot
+# Fetches both accounts and mirrors them. Changes nothing when either
+# can't be read, or when it would delete more than it does without asking
+# (`cloud-contacts mirror` says why).
+ExecStart=/usr/bin/cloud-contacts mirror run --quiet
+TimeoutStartSec=10min
+Nice=10

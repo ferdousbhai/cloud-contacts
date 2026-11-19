@@ -1,4 +1,4 @@
-//! Keeping iCloud and Google the same, on two in-memory accounts: the merge
+//! Mirroring iCloud and Google, on two in-memory accounts: the merge
 //! rules, the guards, turning on, a run killed after every write and run
 //! again, and seeded random sequences of edits, additions and deletions on
 //! both sides that must converge with nothing lost and nothing doubled.
@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use cloud_contacts::account::{Provider, Saved, SyncReport};
 use cloud_contacts::error::{Error, Result};
-use cloud_contacts::keep_same::{self, Decision, Engine, RunError, Shared};
+use cloud_contacts::mirror::{self, Decision, Engine, RunError, Shared};
 use cloud_contacts::model::{Change, Contact, Field, Multi, parse_labeled};
 use cloud_contacts::store::Cache;
 use serde_json::json;
@@ -171,19 +171,19 @@ impl World {
         Engine::new(self.root.path(), &self.icloud, &self.google)
     }
 
-    fn on(&self) -> keep_same::Plan {
+    fn on(&self) -> mirror::Plan {
         let plan = self.engine().plan().unwrap();
-        keep_same::turn_on(self.root.path(), &plan, &[]).unwrap();
+        mirror::turn_on(self.root.path(), &plan, &[]).unwrap();
         plan
     }
 
-    fn run(&self) -> std::result::Result<keep_same::Report, RunError> {
+    fn run(&self) -> std::result::Result<mirror::Report, RunError> {
         self.engine().run(false)
     }
 
     /// Both accounts hold the same contacts, linked one to one.
     fn assert_same(&self) {
-        let s = keep_same::load(self.root.path()).unwrap();
+        let s = mirror::load(self.root.path()).unwrap();
         let (i, g) = (self.icloud.all(), self.google.all());
         assert_eq!(s.links.len(), i.len(), "every iCloud contact linked: {:#?}", s.links);
         assert_eq!(s.links.len(), g.len(), "every Google contact linked");
@@ -279,7 +279,7 @@ fn turning_on_pairs_what_is_in_both_and_holds_doubts() {
     assert_eq!(w.google.by_first("Ann").len(), 1);
     assert!(w.google.by_first("Bob").is_empty() && w.icloud.by_first("Rob").is_empty());
     // called different people: each is copied
-    keep_same::decide(w.root.path(), &bob, &rob, Decision::Different).unwrap();
+    mirror::decide(w.root.path(), &bob, &rob, Decision::Different).unwrap();
     w.run().unwrap();
     assert_eq!(w.google.by_first("Bob").len(), 1);
     assert_eq!(w.icloud.by_first("Rob").len(), 1);
@@ -297,10 +297,35 @@ fn deciding_same_links_a_waiting_pair() {
         .google
         .add_direct(&[Change::Set(Field::First, "Rob".into()), phone("555 0100")]);
     w.on();
-    keep_same::decide(w.root.path(), &bob, &rob, Decision::Same).unwrap();
+    mirror::decide(w.root.path(), &bob, &rob, Decision::Same).unwrap();
     w.run().unwrap();
     w.assert_same();
     assert_eq!(w.icloud.all().len(), 1, "joined, not copied");
+}
+
+/// 0.4.0 and 0.4.1 kept the state as keep-same.json: it is taken over,
+/// links and all, so nothing is copied twice after the rename.
+#[test]
+fn the_state_of_keep_same_carries_over() {
+    let w = World::new();
+    for n in 0..2 {
+        w.icloud.add_direct(&person(&format!("P{n}")));
+    }
+    w.on();
+    w.run().unwrap();
+    let before = mirror::load(w.root.path()).unwrap();
+    assert!(before.on);
+    let (new, old) = (w.root.path().join("mirror.json"), w.root.path().join("keep-same.json"));
+    std::fs::rename(&new, &old).unwrap();
+    let after = mirror::load(w.root.path()).unwrap();
+    assert!(new.exists() && !old.exists());
+    assert_eq!(
+        serde_json::to_value(&after).unwrap(),
+        serde_json::to_value(&before).unwrap()
+    );
+    w.run().unwrap();
+    assert_eq!(w.google.all().len(), 2, "nothing copied twice");
+    w.assert_same();
 }
 
 #[test]
@@ -319,7 +344,7 @@ fn too_many_deletions_stop_until_confirmed() {
         other => panic!("{other:?}"),
     }
     assert_eq!(w.google.all().len(), 4, "nothing deleted");
-    let s = keep_same::load(w.root.path()).unwrap();
+    let s = mirror::load(w.root.path()).unwrap();
     assert!(s.problem.unwrap().contains("would delete 3"));
     w.engine().run(true).unwrap();
     assert_eq!(w.google.all().len(), 1);
@@ -332,7 +357,7 @@ fn a_failing_account_changes_nothing_on_the_other() {
     w.icloud.add_direct(&person("Ann"));
     w.on();
     w.google.fail.store(true, Ordering::SeqCst);
-    assert!(matches!(w.run(), Err(RunError::Account(keep_same::Side::Google, _))));
+    assert!(matches!(w.run(), Err(RunError::Account(mirror::Side::Google, _))));
     assert_eq!(w.icloud.all().len(), 1);
     w.google.fail.store(false, Ordering::SeqCst);
     w.run().unwrap();
@@ -490,8 +515,8 @@ fn run_case(seed: u64) {
     }
     // doubtful pairs found when it was turned on wait for the person: here
     // they are called different people
-    for p in keep_same::load(w.root.path()).unwrap().waiting {
-        keep_same::decide(w.root.path(), &p.icloud, &p.google, Decision::Different).unwrap();
+    for p in mirror::load(w.root.path()).unwrap().waiting {
+        mirror::decide(w.root.path(), &p.icloud, &p.google, Decision::Different).unwrap();
     }
     for _ in 0..2 {
         w.engine().run(true).unwrap();

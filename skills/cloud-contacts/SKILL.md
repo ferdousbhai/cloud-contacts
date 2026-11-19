@@ -1,6 +1,6 @@
 ---
 name: cloud-contacts
-description: Search, add, edit, delete, export and merge the owner's iCloud and Google contacts, and keep the two the same when asked, through the cloud-contacts CLI using Bash; install it or link an account when needed. Use for contacts and address-book tasks.
+description: Search, add, edit, delete, export and merge the owner's iCloud and Google contacts, and mirror the two when asked, through the cloud-contacts CLI using Bash; install it or link an account when needed. Use for contacts and address-book tasks.
 ---
 
 # Cloud Contacts
@@ -8,7 +8,7 @@ description: Search, add, edit, delete, export and merge the owner's iCloud and 
 `cloud-contacts` shows the iCloud and Google accounts linked on this computer
 side by side. Each contact lives in one account, its ID says which
 (`icloud:2B7E…`, `google:people/c123`), and a change goes to that account
-alone (unless keep-same is on, below). Use it rather than `gws people`
+alone (unless mirroring is on, below). Use it rather than `gws people`
 or icloud.com. [Product docs](https://github.com/ferdousbhai/cloud-contacts).
 
 ## Install and accounts
@@ -59,25 +59,25 @@ including what this tool does not show (photos, Google's groups). iCloud
 keeps no Recently Deleted for contacts; Google keeps its Trash 30 days.
 Delete only what the person asked to delete.
 
-## Keeping iCloud and Google the same
+## Mirroring iCloud and Google
 
 Only for people with both an iCloud and a Google account linked (otherwise
-`keep-same` fails with `needs_both_accounts`, exit 3). Off until turned on.
+`mirror` fails with `needs_both_accounts`, exit 3). Off until turned on.
 
 ```bash
-cloud-contacts keep-same            # status: on, linked, last_run, problem, waiting
-cloud-contacts keep-same on --yes   # only when the person asked to keep them the same
-cloud-contacts keep-same run        # make them the same now
-cloud-contacts keep-same pair ICLOUD_ID GOOGLE_ID   # a waiting pair is one person
-cloud-contacts keep-same apart ICLOUD_ID GOOGLE_ID  # ... or two
+cloud-contacts mirror               # status: on, linked, last_run, problem, waiting
+cloud-contacts mirror on --yes      # only when the person asked to mirror them
+cloud-contacts mirror run           # mirror them now
+cloud-contacts mirror pair ICLOUD_ID GOOGLE_ID   # a waiting pair is one person
+cloud-contacts mirror apart ICLOUD_ID GOOGLE_ID  # ... or two
 cloud-contacts duplicates           # possible duplicates, within and across accounts
 cloud-contacts merge CONTACT CONTACT [--keep ACCOUNT] --yes
 ```
 
-Check `cloud-contacts status` (its `keep_same`) or `keep-same` when asked whether
+Check `cloud-contacts status` (its `mirror`) or `mirror` when asked whether
 it is on. Turn it on, call pairs, or merge only when the person asks. A run
 stopped at `too_many_deletions` (exit 2) lists what it would delete: show the
-person, and run `keep-same run --yes` only if they confirm. Photos, Google's
+person, and run `mirror run --yes` only if they confirm. Photos, Google's
 groups and iCloud-only fields never cross.
 
 ## Output and errors
