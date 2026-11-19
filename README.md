@@ -89,9 +89,8 @@ the main menu, beside Refresh) shows them:
   the name not kept becomes the nickname, so search finds either); or the same full name or
   company (case, punctuation, spaces and accents aside), even with other numbers: merging
   keeps them all. Merge All merges them, each group into one card.
-- **Check these**, a pair at a time: the same first name alone (first names are common), a
-  shared number on a card of two people (Rumpa & Joel and Rumpa), or the same full name with
-  different birthdays. Merge, or Keep Apart (they are not shown again). A first name inside a
+- **Check these**, a pair at a time: the same first name alone (first names are common), or
+  the same full name with different birthdays. Merge, or Keep Apart (they are not shown again). A first name inside a
   fuller one with nothing in common (Jack and Jack (Club)) is not a duplicate.
 - **In both accounts**: one in iCloud and one in Google; mirroring pairs these.
 

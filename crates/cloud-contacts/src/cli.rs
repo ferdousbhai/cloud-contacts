@@ -153,9 +153,8 @@ enum Command {
     /// Likely: a shared phone or email, whatever the names (the name not
     /// kept becomes the nickname); or the same full name or company, even
     /// with other numbers (merging keeps them all). Check, a pair at a
-    /// time: the same first name alone, a shared number on a card of two
-    /// people (`Rumpa & Joel`), or the same full name with different
-    /// birthdays. One name inside another with nothing
+    /// time: the same first name alone, or the same full name with
+    /// different birthdays. One name inside another with nothing
     /// shared is not reported. Only likely pairs join cards into groups.
     /// Contacts called different people (`duplicates apart`) are not shown
     /// again. A pair in two accounts is listed apart: mirroring pairs those.
