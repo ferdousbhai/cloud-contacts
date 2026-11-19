@@ -330,6 +330,10 @@ enum MirrorAction {
     On {
         #[arg(long, short)]
         yes: bool,
+        /// Only say what turning it on would do (the pairs it links, the
+        /// doubtful ones, how many it copies); changes nothing
+        #[arg(long, conflicts_with = "yes")]
+        dry_run: bool,
     },
     /// Turn it off: both accounts keep their contacts as they are
     Off,
@@ -867,15 +871,23 @@ impl Cli {
                     .into(),
                 )
             }
-            Some(MirrorAction::On { yes }) => {
+            Some(MirrorAction::On { yes, dry_run }) => {
                 let plan = engine.plan().map_err(run_failure)?;
-                let question = format!(
-                    "Mirror contacts between iCloud and Google? {} already in both will be linked, {} copied to Google and {} to iCloud; {} possible duplicates wait for you.",
+                let what = format!(
+                    "{} already in both will be linked, {} copied to Google and {} to iCloud; {} possible duplicates wait for you",
                     plan.pairs.len(),
                     plan.to_google,
                     plan.to_icloud,
                     plan.doubtful.len()
                 );
+                if dry_run {
+                    let mut lines = vec![format!("Turning mirroring on: {what}. Nothing changed.")];
+                    for d in &plan.doubtful {
+                        lines.push(format!("  waits: {} / {} ({})", d.icloud, d.google, d.why));
+                    }
+                    return status(Some(json!({ "plan": plan })), lines.join("\n"));
+                }
+                let question = format!("Mirror contacts between iCloud and Google? {what}.");
                 confirm(self.mode, "mirror on", yes, &question)?;
                 mirror::turn_on(root, &plan, &[])?;
                 let mut data = json!({ "plan": plan });
