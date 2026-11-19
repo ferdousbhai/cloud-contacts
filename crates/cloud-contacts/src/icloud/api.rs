@@ -154,19 +154,17 @@ impl<'a> Client<'a> {
         saved(&answer, id, tokens)
     }
 
-    /// Deletes the card `id` as of its `etag`; answers the tokens to carry next.
-    pub fn delete(&self, tokens: &Tokens, id: &str, etag: &str) -> Result<Tokens> {
+    /// Deletes the card `id` as of its `etag`; answers the tokens to carry
+    /// next, and whether the answer lists `id` as deleted. Several writes in
+    /// a row can get an answer that does not, the card deleted or not: the
+    /// caller looks (see `Service::delete`).
+    pub fn delete(&self, tokens: &Tokens, id: &str, etag: &str) -> Result<(Tokens, bool)> {
         let answer = self.card_call(tokens, Some("DELETE"), json!({ "contactId": id, "etag": etag }))?;
         refused(&answer, id)?;
-        let deleted = answer["deletes"]["contactIds"]
+        let listed = answer["deletes"]["contactIds"]
             .as_array()
             .is_some_and(|ids| ids.iter().any(|d| d == id));
-        if !deleted {
-            return Err(bad_response(format!(
-                "iCloud's answer does not list contact {id} as deleted"
-            )));
-        }
-        Ok(tokens.after(&answer))
+        Ok((tokens.after(&answer), listed))
     }
 }
 

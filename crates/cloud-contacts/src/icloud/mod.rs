@@ -177,7 +177,7 @@ impl ICloud {
     /// Answers why the local cache may still show it, if it may.
     pub fn delete(&self, c: &Contact) -> Result<Option<String>> {
         let client = Client::connect(&self.t)?;
-        let tokens = match self.with_tokens(&client, |t| client.delete(t, c.id(), c.etag())) {
+        let (tokens, listed) = match self.with_tokens(&client, |t| client.delete(t, c.id(), c.etag())) {
             Err(e) if e.is_conflict() => {
                 let Some(fresh) = self.fresh(c)? else {
                     return Ok(None);
@@ -186,6 +186,24 @@ impl ICloud {
             }
             other => other?,
         };
+        if !listed {
+            // the answer does not say: look (a sync, which also renews the
+            // cache), and when the card is still there, delete it once more
+            // with fresh tokens
+            let Some(fresh) = self.fresh(c)? else {
+                return Ok(None);
+            };
+            let (start, _) = client.startup()?;
+            let (tokens, listed) = client.delete(&start, fresh.id(), fresh.etag())?;
+            if !listed && self.fresh(c)?.is_some() {
+                return Err(icloud_session::Error::BadResponse(format!(
+                    "iCloud did not delete contact {}; try again later",
+                    c.id()
+                ))
+                .into());
+            }
+            return Ok(self.record(tokens, |cache| cache.remove(c.id())));
+        }
         Ok(self.record(tokens, |cache| cache.remove(c.id())))
     }
 
