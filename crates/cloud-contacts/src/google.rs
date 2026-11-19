@@ -53,8 +53,7 @@ pub const INSTALL_HINT: &str = "install Google's Workspace CLI: `npm install -g 
 /// The key in a card that holds Google's own record of the contact.
 pub const ORIGINAL: &str = "googlePerson";
 /// What is read of a contact.
-const PERSON_FIELDS: &str =
-    "names,nicknames,emailAddresses,phoneNumbers,organizations,biographies,urls,addresses,birthdays,photos,metadata";
+const PERSON_FIELDS: &str = "names,nicknames,emailAddresses,phoneNumbers,organizations,biographies,urls,addresses,birthdays,photos,metadata,memberships";
 /// What a write sets: every field this app shows. One left out of the
 /// person written is removed.
 const UPDATE_FIELDS: &str =
@@ -238,15 +237,20 @@ impl Google {
 
     /// `gws people people <method...> --params <params> [--json <body>]`.
     fn call(&self, method: &[&str], params: Value, body: Option<&Value>) -> Result<Value> {
+        self.call_in("people", method, params, body)
+    }
+
+    /// `gws people <resource> <method...> ...`: `people` or `contactGroups`.
+    fn call_in(&self, resource: &str, method: &[&str], params: Value, body: Option<&Value>) -> Result<Value> {
         if !self.signed_in() {
             return Err(self.fail(
                 Kind::Auth,
                 format!("not signed in; run `cloud-contacts account login {}`", self.name),
             ));
         }
-        let what = method.join(" ");
+        let what = format!("{resource} {}", method.join(" "));
         let mut cmd = self.gws();
-        cmd.args(["people", "people"])
+        cmd.args(["people", resource])
             .args(method)
             .arg("--params")
             .arg(params.to_string());
@@ -259,7 +263,7 @@ impl Google {
             Run::TimedOut => {
                 return Err(self.fail(
                     Kind::Unavailable,
-                    format!("`gws people people {what}` took longer than {}s", TIMEOUT.as_secs()),
+                    format!("`gws people {what}` took longer than {}s", TIMEOUT.as_secs()),
                 ));
             }
             Run::Failed(e) => {
@@ -274,7 +278,7 @@ impl Google {
             return parsed.map_err(|e| {
                 self.fail(
                     Kind::Unavailable,
-                    format!("`gws people people {what}` answered something that isn't JSON ({e})"),
+                    format!("`gws people {what}` answered something that isn't JSON ({e})"),
                 )
             });
         }
@@ -297,7 +301,7 @@ impl Google {
                 .to_string();
         }
         if message.is_empty() {
-            message = format!("`gws people people {what}` failed");
+            message = format!("`gws people {what}` failed");
         }
         let message: String = message.lines().next().unwrap_or("").chars().take(300).collect();
         let again = format!("run `cloud-contacts account login {}` to sign in again", self.name);
@@ -471,6 +475,28 @@ impl Provider for Google {
             other => other?,
         };
         self.put(&person)
+    }
+
+    /// The kept contact joins every contact group the merged ones were in
+    /// (a card does not carry groups, and a deleted contact leaves its own).
+    fn carry_over(&self, kept: &Contact, others: &[&Contact]) -> Result<Option<String>> {
+        let has = groups(kept);
+        let mut wanted: Vec<String> = others
+            .iter()
+            .flat_map(|c| groups(c))
+            .filter(|g| !has.contains(g))
+            .collect();
+        wanted.sort();
+        wanted.dedup();
+        for group in wanted {
+            self.call_in(
+                "contactGroups",
+                &["members", "modify"],
+                json!({ "resourceName": group }),
+                Some(&json!({ "resourceNamesToAdd": [kept.id()] })),
+            )?;
+        }
+        Ok(None)
     }
 
     fn delete(&self, c: &Contact) -> Result<Option<String>> {
@@ -737,6 +763,17 @@ fn address_field(a: &Value) -> Value {
 /// The list `key` of Google's record of a card's contact.
 fn originals<'a>(orig: &'a Value, key: &str) -> Vec<&'a Value> {
     orig[key].as_array().map(|a| a.iter().collect()).unwrap_or_default()
+}
+
+/// The contact groups a Google contact is in, from Google's record of it.
+fn groups(c: &Contact) -> Vec<String> {
+    c.0.get(ORIGINAL)
+        .and_then(|p| p["memberships"].as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|m| m["contactGroupMembership"]["contactGroupResourceName"].as_str())
+        .map(str::to_owned)
+        .collect()
 }
 
 /// A card as the Google person to write, on top of Google's record of it

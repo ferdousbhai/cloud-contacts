@@ -160,11 +160,17 @@ impl Change {
 }
 
 /// Whether two phone numbers are the same: equal digits, or one the other's
-/// tail of seven digits or more (`555-010-0199` is `+1 555 010 0199`).
+/// tail of seven digits or more (`555-010-0199` is `+1 555 010 0199`), once
+/// a trunk 0 or an international 00 in front is dropped: Finland's local
+/// `0408 400701` is `+358 40 8400701`.
 pub fn same_number(a: &str, b: &str) -> bool {
     let (a, b) = (digits(a), digits(b));
-    let (short, long) = if a.len() <= b.len() { (&a, &b) } else { (&b, &a) };
-    !short.is_empty() && (short == long || (short.len() >= 7 && long.ends_with(short.as_str())))
+    if !a.is_empty() && a == b {
+        return true;
+    }
+    let (a, b) = (a.trim_start_matches('0'), b.trim_start_matches('0'));
+    let (short, long) = if a.len() <= b.len() { (a, b) } else { (b, a) };
+    !short.is_empty() && (short == long || (short.len() >= 7 && long.ends_with(short)))
 }
 
 /// Whether a card made of `changes` names someone: a contact needs a name,

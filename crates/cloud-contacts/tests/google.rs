@@ -427,15 +427,17 @@ fn mirror_on_copies_both_ways_and_holds_doubts() {
 fn duplicates_and_merge() {
     let env = start();
     let dups = env.json(&["duplicates"]);
-    let ann = dups
+    // the two Ann Lees are in two accounts: listed apart, mirroring pairs those
+    let ann = dups["across"]
         .as_array()
         .unwrap()
         .iter()
         .find(|d| d["names"][0] == "Ann Lee")
         .expect("the two Ann Lees");
     assert_eq!(ann["why"], json!(["name Ann Lee"]));
-    // merge into the iCloud one: Google's company is not taken over iCloud's,
-    // and the Google copy goes
+    assert!(dups["groups"].as_array().unwrap().is_empty(), "{dups}");
+    // merge into the iCloud one: iCloud's company stays, Google's goes to the
+    // notes, and the Google copy goes
     let (exit, _) = env.fails(&["merge", "icloud:ANN-LEE", "google:people/c2"]);
     assert_eq!(exit, 2, "asks first");
     let out = env.json(&[
@@ -446,15 +448,96 @@ fn duplicates_and_merge() {
         "icloud",
         "--yes",
     ]);
-    assert_eq!(out["contact"]["id"], "icloud:ANN-LEE");
-    assert_eq!(out["contact"]["company"], "Acme");
-    assert_eq!(out["deleted"]["id"], "google:people/c2");
-    assert!(env.google()["people"].get("people/c2").is_none());
+    assert_eq!(out["merged"][0]["kept"], "icloud:ANN-LEE");
+    assert_eq!(out["merged"][0]["deleted"], json!(["google:people/c2"]));
+    let ann = env.json(&["show", "icloud:ANN-LEE"]);
+    assert_eq!(ann["company"], "Acme");
     assert!(
-        env.json(&["duplicates"])
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|d| d["names"][0] != "Ann Lee")
+        ann["notes"].as_str().unwrap().contains("Also: Company: Google Ann Co"),
+        "{ann}"
     );
+    assert!(env.google()["people"].get("people/c2").is_none());
+    let backup = std::fs::read_to_string(out["merged"][0]["backup"].as_str().unwrap()).unwrap();
+    assert_eq!(backup.matches("BEGIN:VCARD").count(), 2);
+    assert!(env.json(&["duplicates"])["across"].as_array().unwrap().is_empty());
+}
+
+/// Duplicates in one account, found as groups and merged with --all: the
+/// fuller card is kept, the other's number written another way is not
+/// added twice, its contact groups come along, and both are backed up
+/// first. A pair called different people is not shown again.
+#[test]
+fn merge_all_within_an_account_loses_nothing() {
+    let env = start();
+    let mut google = env.google();
+    let people = google["people"].as_object_mut().unwrap();
+    people.insert(
+        "people/c3".into(),
+        json!({
+            "resourceName": "people/c3", "etag": "g3",
+            "names": [{"givenName": "Rui"}],
+            "phoneNumbers": [{"value": "+351 912 000 111", "type": "mobile"}],
+            "biographies": [{"value": "Plays the cello"}],
+            "memberships": [{"contactGroupMembership": {"contactGroupResourceName": "contactGroups/band"}}],
+        }),
+    );
+    people.insert(
+        "people/c4".into(),
+        json!({
+            "resourceName": "people/c4", "etag": "g4",
+            "names": [{"givenName": "Rui", "familyName": "Matos"}],
+            "phoneNumbers": [{"value": "912 000 111", "type": "mobile"}],
+            "emailAddresses": [{"value": "rui@example.pt", "type": "home"}],
+        }),
+    );
+    people.insert(
+        "people/c5".into(),
+        json!({
+            "resourceName": "people/c5", "etag": "g5",
+            "names": [{"givenName": "Nia"}],
+            "phoneNumbers": [{"value": "+44 7700 900001", "type": "mobile"}],
+        }),
+    );
+    people.insert(
+        "people/c6".into(),
+        json!({
+            "resourceName": "people/c6", "etag": "g6",
+            "names": [{"givenName": "Nia", "familyName": "Bell"}],
+            "phoneNumbers": [{"value": "+44 7700 900002", "type": "mobile"}],
+        }),
+    );
+    std::fs::write(gws_state(env.dir.path()), google.to_string()).unwrap();
+
+    let dups = env.json(&["duplicates"]);
+    let groups = dups["groups"].as_array().unwrap();
+    assert_eq!(groups.len(), 2, "{dups}");
+    let (rui, nia) = (&groups[0], &groups[1]);
+    assert_eq!(rui["confidence"], "likely");
+    assert_eq!(rui["keep"], "google:people/c4");
+    assert_eq!(rui["merged"]["name"], "Rui Matos");
+    assert_eq!(rui["merged"]["phones"].as_array().unwrap().len(), 1);
+    assert!(rui["merged"]["notes"].as_str().unwrap().contains("cello"));
+    assert_eq!(nia["confidence"], "check");
+
+    let (exit, _) = env.fails(&["merge", "--all"]);
+    assert_eq!(exit, 2, "asks first");
+    let out = env.json(&["merge", "--all", "--yes"]);
+    let merged = out["merged"].as_array().unwrap();
+    assert_eq!(merged.len(), 1, "only the likely group");
+    assert_eq!(merged[0]["kept"], "google:people/c4");
+    let people = &env.google()["people"];
+    assert!(people.get("people/c3").is_none());
+    let kept = &people["people/c4"];
+    assert_eq!(kept["biographies"][0]["value"], "Plays the cello");
+    assert_eq!(
+        kept["memberships"][0]["contactGroupMembership"]["contactGroupResourceName"],
+        "contactGroups/band"
+    );
+    let backup = std::fs::read_to_string(merged[0]["backup"].as_str().unwrap()).unwrap();
+    assert_eq!(backup.matches("BEGIN:VCARD").count(), 2);
+    assert!(backup.contains("cello"));
+
+    // the Nias are called different people: not shown again
+    env.ok(&["duplicates", "apart", "google:people/c5", "google:people/c6"]);
+    assert!(env.json(&["duplicates"])["groups"].as_array().unwrap().is_empty());
 }

@@ -12,6 +12,7 @@ mod agent_skill;
 pub mod book;
 pub mod cli;
 pub mod config;
+pub mod dedupe;
 pub mod draft;
 pub mod error;
 pub mod google;

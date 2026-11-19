@@ -79,9 +79,34 @@ cloud-contacts mirror off      # both accounts keep their contacts as they are
   contacts. Cloud Contacts 0.4.0 and 0.4.1 called this keep-same; that command still works for
   now, and its links carry over.
 
-`cloud-contacts duplicates` lists contacts that may be one person (the same email, phone or
-name), in one account or across both, and `cloud-contacts merge CONTACT CONTACT [--keep
-ACCOUNT]` joins two into one and deletes the other (it asks first).
+## Duplicates
+
+Cloud Contacts finds contacts that may be one person and merges them for you, losing nothing.
+The window says how many look like duplicates, above the contacts; Review… (or Duplicates… in
+the main menu) shows them:
+
+- **Likely the same**: the same name and a shared phone or email; a shared phone or email and
+  one name inside the other (Marco and Marco Gomez); or the same full name with nothing against
+  it. Merge All merges them, each group into one card.
+- **Check these**: one first name with different numbers, or different names sharing a number.
+  Merge, or Keep Apart (they are not shown again).
+- **In both accounts**: one in iCloud and one in Google; mirroring pairs these.
+
+```sh
+cloud-contacts duplicates                 # the groups, how sure, why, and the card each would become
+cloud-contacts merge --all                # every likely group (asks first)
+cloud-contacts merge CONTACT CONTACT...   # these, into one
+cloud-contacts duplicates apart CONTACT CONTACT...   # different people: not shown again
+```
+
+A merge keeps every phone, email, URL and address of them all (a number written another way,
+`0408 400701` and `+358 40 8400701`, once); the fuller name, with the other name as the nickname
+(or a line in the notes) when it is more than another spelling; fields only one has; and, where
+both have a field differently, the kept one's, with the other's in the notes (`Also: Company:
+…`). Notes are joined. The card kept is the one with the most in it, so its photo and the fields
+this app does not show stay; in Google, it joins the others' contact groups. Before anything is
+deleted, every card is saved as a vCard to `~/.local/share/cloud-contacts/merged-backup/<date>.vcf`;
+then the kept card is updated; only then are the others deleted.
 
 ## Command line
 

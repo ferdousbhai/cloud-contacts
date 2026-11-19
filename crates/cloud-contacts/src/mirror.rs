@@ -273,6 +273,11 @@ fn merge_list<T: Clone + PartialEq>(base: Option<&[T]>, i: &[T], g: &[T], same: 
 
 /// The merge of a linked pair: what both should hold, and the warnings.
 pub fn merge(base: Option<&Shared>, i: &Shared, g: &Shared, later: Later) -> (Shared, Vec<String>) {
+    // a pair just linked (no base yet) is joined as merging a duplicate
+    // does: nothing either side says is lost
+    if base.is_none() {
+        return (crate::dedupe::merge_into(i, g), Vec::new());
+    }
     let mut out = i.clone();
     let mut warnings = Vec::new();
     for f in SCALARS {

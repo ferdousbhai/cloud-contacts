@@ -27,6 +27,7 @@ use crate::accounts;
 use crate::agent_skill;
 use crate::book::{Book, Entry, Shown};
 use crate::config;
+use crate::dedupe;
 use crate::error::{Error, Kind};
 use crate::icloud::api::SessionTransport;
 use crate::mirror;
@@ -147,24 +148,44 @@ enum Command {
         #[command(subcommand)]
         action: Option<MirrorAction>,
     },
-    /// Contacts that may be one person, within an account or across them: the same email, phone or name.
+    /// Contacts that may be one person, in groups: those likely the same (`merge --all` merges them), those to check, and pairs across accounts.
     ///
-    /// JSON: [{a, b, names: [a's, b's], why}] (contacts mirror links are not listed)
+    /// Likely: the same name and a shared phone or email; a shared phone or
+    /// email and one name inside the other; or the same full name with
+    /// nothing against it. Check: anything else found (one first name and
+    /// different numbers, different names sharing a number). Contacts called
+    /// different people (`duplicates apart`) are not shown again. A pair in
+    /// two accounts is listed apart: mirroring pairs those.
+    ///
+    /// JSON: {groups: [{confidence: "likely"|"check", members: [{id, name}],
+    /// keep, why, merged}], across: [{a, b, names, why}]}; `merged` is the
+    /// card the group would become.
     #[command(after_help = AFTER_HELP)]
-    Duplicates,
-    /// Merge two contacts into one: the kept one gets the other's phones, emails, URLs and addresses, and fields it lacks; then the other is deleted.
+    Duplicates {
+        #[command(subcommand)]
+        action: Option<DuplicatesAction>,
+    },
+    /// Merge contacts into one, losing nothing: `merge --all` merges every likely group, `merge A B [C...]` the ones named.
     ///
-    /// The kept one is the first named, or the one in --keep ACCOUNT. Asks
-    /// before deleting in text mode on a terminal; anywhere else --yes.
+    /// The card kept gets every phone, email, URL and address of the others,
+    /// the fuller name (the other name, when more than a spelling of it,
+    /// becomes the nickname or a note), fields it lacks, and the others'
+    /// different ones and notes in its notes. Before anything is deleted,
+    /// every card is saved as a vCard in <data>/merged-backup/<date>.vcf;
+    /// then the kept card is updated; then the others are deleted. In one
+    /// account the card with the most in it is kept; across two accounts,
+    /// the first named or the one in --keep ACCOUNT. Asks in text mode on a
+    /// terminal; anywhere else --yes.
     ///
-    /// JSON: {action: "merge", contact, deleted: {id, name}}
+    /// JSON: {merged: [{kept, name, deleted: [id], backup, warnings}]}
     #[command(after_help = AFTER_HELP)]
     Merge {
-        #[arg(value_name = "CONTACT")]
-        a: String,
-        #[arg(value_name = "CONTACT")]
-        b: String,
-        /// Keep the one in this account.
+        #[arg(value_name = "CONTACT", required_unless_present = "all")]
+        contacts: Vec<String>,
+        /// Every group `duplicates` calls likely (within one account each).
+        #[arg(long, conflicts_with = "contacts")]
+        all: bool,
+        /// Across two accounts: keep the one in this account.
         #[arg(long, value_name = "ACCOUNT")]
         keep: Option<String>,
         #[arg(long, short)]
@@ -289,6 +310,15 @@ enum Command {
     Skill {
         #[command(subcommand)]
         action: Option<SkillAction>,
+    },
+}
+
+#[derive(Subcommand)]
+enum DuplicatesAction {
+    /// These are different people: never shown as duplicates of each other again
+    Apart {
+        #[arg(value_name = "CONTACT", num_args = 2.., required = true)]
+        contacts: Vec<String>,
     },
 }
 
@@ -527,8 +557,14 @@ impl Cli {
             } => self.export(&contacts, output, account.as_deref()),
             Command::Refresh { account } => self.refresh(account.as_deref()),
             Command::Mirror { action } => self.mirror(action),
-            Command::Duplicates => self.duplicates(),
-            Command::Merge { a, b, keep, yes } => self.merge(&a, &b, keep.as_deref(), yes),
+            Command::Duplicates { action: None } => self.duplicates(),
+            Command::Duplicates {
+                action: Some(DuplicatesAction::Apart { contacts }),
+            } => self.apart(&contacts),
+            Command::Merge { all: true, yes, .. } => self.merge_all(yes),
+            Command::Merge {
+                contacts, keep, yes, ..
+            } => self.merge(&contacts, keep.as_deref(), yes),
             Command::Account { action } => self.account(action),
             Command::Skill { .. } => unreachable!("handled before the accounts open"),
         }
@@ -905,46 +941,94 @@ impl Cli {
         ))
     }
 
-    fn duplicates(&self) -> Outcome {
-        let shown = self.fresh(None)?;
-        let linked: std::collections::BTreeSet<(String, String)> = mirror::load(&self.root)
+    /// Pairs mirroring links, both ways.
+    fn mirror_linked(&self) -> std::collections::BTreeSet<(String, String)> {
+        mirror::load(&self.root)
             .map(|s| {
                 s.links
                     .into_iter()
                     .flat_map(|l| [(l.icloud.clone(), l.google.clone()), (l.google, l.icloud)])
                     .collect()
             })
-            .unwrap_or_default();
-        let pairs = duplicate_pairs(&shown.entries, &linked);
-        let data: Vec<Value> = pairs
+            .unwrap_or_default()
+    }
+
+    fn duplicates(&self) -> Outcome {
+        let shown = self.fresh(None)?;
+        let apart = dedupe::Apart::load(&self.root)?;
+        let (groups, across) = dedupe::find(&shown.entries, &apart, &self.mirror_linked());
+        let mut data_groups = Vec::new();
+        let mut human = Vec::new();
+        let likely = groups
             .iter()
-            .map(|(a, b, why)| {
-                json!({ "a": a.id(), "b": b.id(), "names": [a.contact.display_name(), b.contact.display_name()], "why": why })
+            .filter(|g| g.confidence == dedupe::Confidence::Likely)
+            .count();
+        for (n, g) in groups.iter().enumerate() {
+            let members: Vec<&Entry> = g.members.iter().map(|&m| &shown.entries[m]).collect();
+            let (keep, merged) = preview(&members);
+            if n == 0 && likely > 0 {
+                human.push("Likely the same (merge them all: cloud-contacts merge --all):".to_string());
+            }
+            if n == likely {
+                human.push("Check these:".to_string());
+            }
+            human.push(format!("  {}", merged.contact.display_name()));
+            for e in &members {
+                human.push(format!("    {} ({})", e.contact.display_name(), e.id()));
+            }
+            human.push(format!("    why: {}", g.why.join(", ")));
+            if g.confidence == dedupe::Confidence::Check {
+                let ids: Vec<String> = members.iter().map(|e| e.id()).collect();
+                human.push(format!(
+                    "    merge: cloud-contacts merge {0}   apart: cloud-contacts duplicates apart {0}",
+                    ids.join(" ")
+                ));
+            }
+            data_groups.push(json!({
+                "confidence": g.confidence,
+                "members": members.iter().map(|e| json!({ "id": e.id(), "name": e.contact.display_name() })).collect::<Vec<_>>(),
+                "keep": members[keep].id(),
+                "why": g.why,
+                "merged": contact_json(&merged),
+            }));
+        }
+        let data_across: Vec<Value> = across
+            .iter()
+            .map(|p| {
+                let (a, b) = (&shown.entries[p.a], &shown.entries[p.b]);
+                json!({ "a": a.id(), "b": b.id(), "names": [a.contact.display_name(), b.contact.display_name()], "why": p.why })
             })
             .collect();
-        let human = if pairs.is_empty() {
-            "No likely duplicates.".to_string()
+        if !across.is_empty() {
+            human.push("In both accounts (mirroring pairs these):".to_string());
+            for p in &across {
+                let (a, b) = (&shown.entries[p.a], &shown.entries[p.b]);
+                human.push(format!(
+                    "  {} ({})  and  {} ({})",
+                    a.contact.display_name(),
+                    a.id(),
+                    b.contact.display_name(),
+                    b.id()
+                ));
+            }
+        }
+        let n = groups.len();
+        let summary = format!(
+            "{likely} likely, {} to check{}",
+            n - likely,
+            if across.is_empty() {
+                String::new()
+            } else {
+                format!(", {} across accounts", across.len())
+            }
+        );
+        let human = if n == 0 && across.is_empty() {
+            "No duplicates.".to_string()
         } else {
-            pairs
-                .iter()
-                .map(|(a, b, why)| {
-                    format!(
-                        "{} ({})  and  {} ({})\n  {}\n  merge: cloud-contacts merge {} {}",
-                        a.contact.display_name(),
-                        a.id(),
-                        b.contact.display_name(),
-                        b.id(),
-                        why.join(", "),
-                        a.id(),
-                        b.id()
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join("\n")
+            format!("{}\n{summary}", human.join("\n"))
         };
-        let n = pairs.len();
         Ok(with_warnings(
-            Response::new(data, format!("{n} likely duplicate{}", if n == 1 { "" } else { "s" }))
+            Response::new(json!({ "groups": data_groups, "across": data_across }), summary)
                 .human(human)
                 .count(n),
             &shown,
@@ -952,73 +1036,126 @@ impl Cli {
         ))
     }
 
-    fn merge(&self, a: &str, b: &str, keep: Option<&str>, yes: bool) -> Outcome {
+    fn apart(&self, contacts: &[String]) -> Outcome {
         let shown = self.fresh(None)?;
-        let (x, y) = (resolve(&shown, a)?.clone(), resolve(&shown, b)?.clone());
-        if x.id() == y.id() {
-            return Err(usage("merge needs two different contacts"));
-        }
-        let st = mirror::load(&self.root).unwrap_or_default();
-        let ids = |e: &Entry| e.contact.id().to_string();
-        if st.on
-            && st
-                .links
-                .iter()
-                .any(|l| (l.icloud == ids(&x) && l.google == ids(&y)) || (l.icloud == ids(&y) && l.google == ids(&x)))
-        {
-            return Err(usage(
-                "these two are one contact mirrored in iCloud and Google; there is nothing to merge",
+        let ids: Vec<String> = contacts
+            .iter()
+            .map(|c| resolve(&shown, c).map(Entry::id))
+            .collect::<Result<_, _>>()?;
+        dedupe::Apart::add(&self.root, &ids)?;
+        Ok(Response::new(
+            json!({ "apart": ids }),
+            format!("{} contacts kept apart: not shown as duplicates again", ids.len()),
+        ))
+    }
+
+    fn merge_all(&self, yes: bool) -> Outcome {
+        let shown = self.fresh(None)?;
+        let apart = dedupe::Apart::load(&self.root)?;
+        let (groups, _) = dedupe::find(&shown.entries, &apart, &self.mirror_linked());
+        let likely: Vec<Vec<&Entry>> = groups
+            .iter()
+            .filter(|g| g.confidence == dedupe::Confidence::Likely)
+            .map(|g| g.members.iter().map(|&m| &shown.entries[m]).collect())
+            .collect();
+        if likely.is_empty() {
+            return Ok(Response::new(
+                json!({ "merged": [] }),
+                "No likely duplicates to merge".to_string(),
             ));
         }
-        let (kept, other) = match keep {
-            Some(acc) if y.account == acc && x.account != acc => (y, x),
-            Some(acc) if x.account != acc => {
-                return Err(usage(format!("neither contact is in {acc}")));
+        let cards: usize = likely.iter().map(Vec::len).sum();
+        let backup = dedupe::backup_path(&self.root);
+        confirm(
+            self.mode,
+            "merge --all",
+            yes,
+            &format!(
+                "Merge {cards} contacts into {}? Each card is saved first to {}.",
+                likely.len(),
+                backup.display()
+            ),
+        )?;
+        let mut done = Vec::new();
+        for group in &likely {
+            let cards: Vec<&model::Contact> = group.iter().map(|e| &e.contact).collect();
+            match dedupe::apply(&self.book, &self.root, group, dedupe::keeper(&cards), false) {
+                Ok(d) => done.push(d),
+                Err(e) => {
+                    let mut f = failure(&e);
+                    f.message = format!(
+                        "merged {} of {} groups, then {}: {}",
+                        done.len(),
+                        likely.len(),
+                        group[0].contact.display_name(),
+                        f.message
+                    );
+                    return Err(f);
+                }
             }
-            _ => (x, y),
+        }
+        Ok(merged_response(done))
+    }
+
+    fn merge(&self, contacts: &[String], keep: Option<&str>, yes: bool) -> Outcome {
+        if contacts.len() < 2 {
+            return Err(usage("merge needs two contacts or more, or --all"));
+        }
+        let shown = self.fresh(None)?;
+        let mut group: Vec<Entry> = Vec::new();
+        for c in contacts {
+            let e = resolve(&shown, c)?.clone();
+            if group.iter().any(|g| g.id() == e.id()) {
+                return Err(usage("merge needs different contacts"));
+            }
+            group.push(e);
+        }
+        let accounts: std::collections::BTreeSet<&str> = group.iter().map(|e| e.account.as_str()).collect();
+        let keep_at = if accounts.len() == 1 {
+            let cards: Vec<&model::Contact> = group.iter().map(|e| &e.contact).collect();
+            dedupe::keeper(&cards)
+        } else {
+            if group.len() != 2 {
+                return Err(usage("across two accounts, merge two contacts at a time"));
+            }
+            let linked = self.mirror_linked();
+            if mirror::load(&self.root).unwrap_or_default().on
+                && linked.contains(&(group[0].contact.id().to_string(), group[1].contact.id().to_string()))
+            {
+                return Err(usage(
+                    "these two are one contact mirrored in iCloud and Google; there is nothing to merge",
+                ));
+            }
+            match keep {
+                Some(acc) if group[1].account == acc => 1,
+                Some(acc) if group[0].account != acc => {
+                    return Err(usage(format!("neither contact is in {acc}")));
+                }
+                _ => 0,
+            }
         };
-        let (sk, so) = (mirror::Shared::of(&kept.contact), mirror::Shared::of(&other.contact));
-        let (merged, _) = mirror::merge(None, &sk, &so, mirror::Later::ICloud);
-        let changes = sk.changes_to(&merged);
+        let others: Vec<String> = group
+            .iter()
+            .enumerate()
+            .filter(|(n, _)| *n != keep_at)
+            .map(|(_, e)| format!("{} ({})", e.contact.display_name(), e.id()))
+            .collect();
         confirm(
             self.mode,
             "merge",
             yes,
             &format!(
-                "Merge {} ({}) into {} ({}), then delete {} from {}?",
-                other.contact.display_name(),
-                other.id(),
-                kept.contact.display_name(),
-                kept.id(),
-                other.id(),
-                other.label()
+                "Merge {} into {} ({}), then delete {}? Each card is saved first to {}.",
+                others.join(", "),
+                group[keep_at].contact.display_name(),
+                group[keep_at].id(),
+                if others.len() == 1 { "it" } else { "them" },
+                dedupe::backup_path(&self.root).display()
             ),
         )?;
-        let saved = if changes.is_empty() {
-            None
-        } else {
-            Some(self.book.update(&kept, &changes)?)
-        };
-        let warning_after = self.book.delete(&other)?;
-        let after = Entry {
-            contact: saved.map_or(kept.contact.clone(), |s| s.value),
-            ..kept
-        };
-        let mut data = json!({
-            "action": "merge",
-            "contact": contact_json(&after),
-            "deleted": { "id": other.id(), "name": other.contact.display_name() },
-        });
-        warn(&mut data, warning_after);
-        Ok(Response::new(
-            data,
-            format!(
-                "Merged {} into {}",
-                other.contact.display_name(),
-                after.contact.display_name()
-            ),
-        )
-        .ids(vec![after.id()]))
+        let refs: Vec<&Entry> = group.iter().collect();
+        let done = dedupe::apply(&self.book, &self.root, &refs, keep_at, accounts.len() > 1)?;
+        Ok(merged_response(vec![done]))
     }
 
     fn account(&self, action: AccountAction) -> Outcome {
@@ -1132,55 +1269,44 @@ fn run_failure(e: mirror::RunError) -> Failure {
     }
 }
 
-/// Likely duplicates among `entries` (not pairs mirror links): indexed
-/// by email, phone digits and name, so a large book is not compared pair by
-/// pair.
-fn duplicate_pairs<'e>(
-    entries: &'e [Entry],
-    linked: &std::collections::BTreeSet<(String, String)>,
-) -> Vec<(&'e Entry, &'e Entry, Vec<String>)> {
-    let mut index: std::collections::HashMap<String, Vec<usize>> = std::collections::HashMap::new();
-    for (n, e) in entries.iter().enumerate() {
-        let c = &e.contact;
-        let mut keys: Vec<String> = c
-            .values(Multi::Email)
-            .iter()
-            .map(|v| format!("e:{}", v.value.trim().to_lowercase()))
-            .collect();
-        keys.extend(c.values(Multi::Phone).iter().filter_map(|v| {
-            let d = model::digits(&v.value);
-            (d.len() >= 7).then(|| format!("p:{}", &d[d.len() - 7..]))
-        }));
-        if !c.person_name().is_empty() {
-            keys.push(format!("n:{}", model::fold(&c.display_name())));
-        }
-        keys.sort();
-        keys.dedup();
-        for k in keys {
-            index.entry(k).or_default().push(n);
-        }
-    }
-    let mut seen = std::collections::BTreeSet::new();
-    let mut out = Vec::new();
-    for group in index.values() {
-        for (x, &a) in group.iter().enumerate() {
-            for &b in &group[x + 1..] {
-                if !seen.insert((a.min(b), a.max(b))) {
-                    continue;
-                }
-                let (ea, eb) = (&entries[a], &entries[b]);
-                if linked.contains(&(ea.contact.id().to_string(), eb.contact.id().to_string())) {
-                    continue;
-                }
-                let why = mirror::evidence(&ea.contact, &eb.contact);
-                if !why.is_empty() {
-                    out.push((ea, eb, why));
-                }
-            }
+/// The card a group would become, and which member is kept.
+fn preview(members: &[&Entry]) -> (usize, Entry) {
+    let cards: Vec<&model::Contact> = members.iter().map(|e| &e.contact).collect();
+    let keep = dedupe::keeper(&cards);
+    let target = dedupe::merge_all(&cards, keep);
+    let mut contact = members[keep].contact.clone();
+    // a preview: changes that don't apply leave the card as it is
+    _ = contact.apply(&mirror::Shared::of(&members[keep].contact).changes_to(&target));
+    (
+        keep,
+        Entry {
+            contact,
+            ..members[keep].clone()
+        },
+    )
+}
+
+/// What `merge` answers.
+fn merged_response(done: Vec<dedupe::Done>) -> Response {
+    let ids: Vec<String> = done.iter().map(|d| d.kept.clone()).collect();
+    let backup = done.first().map(|d| d.backup.display().to_string()).unwrap_or_default();
+    let mut lines: Vec<String> = done
+        .iter()
+        .map(|d| format!("Merged {} into {} ({})", d.deleted.len() + 1, d.name, d.kept))
+        .collect();
+    lines.push(format!("Both cards of each were saved first to {backup}"));
+    for d in &done {
+        for w in &d.warnings {
+            lines.push(format!("warning: {w}"));
         }
     }
-    out.sort_by_key(|(a, b, _)| (a.contact.sort_key(), b.contact.sort_key()));
-    out
+    let n = done.len();
+    Response::new(
+        json!({ "merged": done }),
+        format!("Merged {n} group{}; backup: {backup}", if n == 1 { "" } else { "s" }),
+    )
+    .human(lines.join("\n"))
+    .ids(ids)
 }
 
 /// What `add` and `edit` answer: the contact as saved.

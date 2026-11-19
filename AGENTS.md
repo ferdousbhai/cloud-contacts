@@ -33,6 +33,10 @@ One crate, `crates/cloud-contacts`:
   `packaging/systemd/cloud-contacts-mirror.{service,timer}` run it; `mirror on` enables the
   timer and disables 0.4.0–0.4.1's `cloud-contacts-keep-same.timer` (`CLOUD_CONTACTS_SYSTEMCTL` in tests). `tests/mirror.rs`: two in-memory accounts,
   every merge rule and guard, a run killed after each write, random sequences that must converge.
+- `src/dedupe.rs` — duplicates: groups (likely/check) within an account and pairs across, the
+  lossless merge (`merge_into`, also mirroring's first join of a pair), which card is kept,
+  keep-apart memory (`<data>/apart.json`), and the merge order (`apply`: backup to
+  `<data>/merged-backup/<date>.vcf`, then the kept card, then the deletions; read its header).
 - `src/cli.rs` — the command line; `src/main.rs` its GTK-free binary; `src/bin/app/` the window
   (`cloud-contacts-app`, feature `ui`). `src/agent_skill.rs` is a shared copy (SHARED_SUPPORT.md).
 - `examples/fake_contacts.rs` — a fake iCloud server (`ICLOUD_SESSION_MOCK=1`); `tests/fake-gws`

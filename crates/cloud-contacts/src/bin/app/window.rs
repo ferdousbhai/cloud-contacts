@@ -18,6 +18,7 @@ use gtk::{gio, glib};
 use cloud_contacts::accounts;
 use cloud_contacts::book::{Book, Entry, Shown};
 use cloud_contacts::config;
+use cloud_contacts::dedupe;
 use cloud_contacts::draft::{Draft, Row, SCALARS, typed};
 use cloud_contacts::error::Error;
 use cloud_contacts::icloud::api::SessionTransport;
@@ -62,6 +63,9 @@ pub struct Window {
     ks_row: adw::SwitchRow,
     /// Set while the switch is moved by the window, not the person.
     ks_quiet: Cell<bool>,
+    /// "N contacts look like duplicates", over the contacts, while any do.
+    dup_offer: gtk::Revealer,
+    dup_label: gtk::Label,
 }
 
 impl Window {
@@ -194,6 +198,7 @@ impl Window {
             }
         });
         action("mirror-review", |this| this.mirror_review());
+        action("duplicates", |this| this.duplicates_dialog());
         action("mirror-not-now", |this| {
             let root = this.root.clone();
             this.ks_offer.set_reveal_child(false);
@@ -449,6 +454,7 @@ impl Window {
                         this.set_accounts(accounts);
                         this.show_warnings(&shown);
                         this.show_mirror();
+                        this.show_duplicate_count(&shown);
                         // Most fetches change nothing: the rows stay.
                         let changed = *this.shown.borrow() != shown;
                         *this.shown.borrow_mut() = shown;
@@ -531,6 +537,253 @@ impl Window {
                 }
                 failed(&this);
             },
+        );
+    }
+
+    /// What `duplicates` finds in `shown`: groups within an account, and
+    /// pairs across accounts (mirroring's).
+    fn find_duplicates(&self, shown: &Shown) -> (Vec<dedupe::Group>, Vec<dedupe::Across>) {
+        let apart = self
+            .root
+            .as_ref()
+            .and_then(|r| dedupe::Apart::load(r).ok())
+            .unwrap_or_default();
+        let linked = self
+            .root
+            .as_ref()
+            .and_then(|r| mirror::load(r).ok())
+            .map(|s| {
+                s.links
+                    .into_iter()
+                    .flat_map(|l| [(l.icloud.clone(), l.google.clone()), (l.google, l.icloud)])
+                    .collect()
+            })
+            .unwrap_or_default();
+        dedupe::find(&shown.entries, &apart, &linked)
+    }
+
+    /// The banner over the contacts while likely duplicates exist.
+    fn show_duplicate_count(&self, shown: &Shown) {
+        let (groups, _) = self.find_duplicates(shown);
+        let likely: usize = groups
+            .iter()
+            .filter(|g| g.confidence == dedupe::Confidence::Likely)
+            .map(|g| g.members.len())
+            .sum();
+        if likely > 0 {
+            self.dup_label
+                .set_label(&format!("{likely} contacts look like duplicates of each other."));
+        }
+        self.dup_offer.set_reveal_child(likely > 0);
+    }
+
+    /// Duplicates: those likely the same, merged all at once; those to
+    /// check, merged or kept apart one group at a time; and pairs across
+    /// accounts, which mirroring pairs.
+    fn duplicates_dialog(self: &Rc<Self>) {
+        let shown = self.shown.borrow().clone();
+        let (groups, across) = self.find_duplicates(&shown);
+        let page = adw::PreferencesPage::new();
+        let dialog = adw::Dialog::builder()
+            .title("Duplicates")
+            .content_width(560)
+            .content_height(640)
+            .build();
+        let entries_of =
+            |g: &dedupe::Group| -> Vec<Entry> { g.members.iter().map(|&m| shown.entries[m].clone()).collect() };
+        let preview = |members: &[Entry]| -> (usize, String, String) {
+            let cards: Vec<&cloud_contacts::model::Contact> = members.iter().map(|e| &e.contact).collect();
+            let keep = dedupe::keeper(&cards);
+            let merged = dedupe::merge_all(&cards, keep);
+            let mut name = [
+                &merged.prefix,
+                &merged.first,
+                &merged.middle,
+                &merged.last,
+                &merged.suffix,
+            ]
+            .iter()
+            .filter(|p| !p.is_empty())
+            .map(|p| p.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
+            if name.is_empty() {
+                name = members[keep].contact.display_name();
+            }
+            let mut parts = vec![format!("{} cards", members.len())];
+            for (n, what) in [(merged.phones.len(), "phone"), (merged.emails.len(), "email")] {
+                if n > 0 {
+                    parts.push(format!("{n} {what}{}", if n == 1 { "" } else { "s" }));
+                }
+            }
+            (keep, name, parts.join(" · "))
+        };
+        let likely: Vec<Vec<Entry>> = groups
+            .iter()
+            .filter(|g| g.confidence == dedupe::Confidence::Likely)
+            .map(entries_of)
+            .collect();
+        if !likely.is_empty() {
+            let g = adw::PreferencesGroup::builder()
+                .title("Likely the Same")
+                .description("Each becomes one card with every phone, email and address of them all. Every card is saved first to a backup file.")
+                .build();
+            let merge_all = gtk::Button::builder()
+                .label("Merge All")
+                .valign(gtk::Align::Center)
+                .css_classes(["suggested-action"])
+                .build();
+            g.set_header_suffix(Some(&merge_all));
+            for members in &likely {
+                let (_, name, detail) = preview(members);
+                let names: Vec<String> = members.iter().map(|e| e.contact.display_name()).collect();
+                g.add(
+                    &adw::ActionRow::builder()
+                        .title(glib::markup_escape_text(&name).as_str())
+                        .subtitle(glib::markup_escape_text(&format!("{detail} · from {}", names.join(", "))).as_str())
+                        .build(),
+                );
+            }
+            let (weak, d) = (Rc::downgrade(self), dialog.clone());
+            merge_all.connect_clicked(move |_| {
+                let Some(this) = weak.upgrade() else { return };
+                d.close();
+                this.merge_groups(likely.clone());
+            });
+            page.add(&g);
+        }
+        let check: Vec<(Vec<Entry>, String)> = groups
+            .iter()
+            .filter(|g| g.confidence == dedupe::Confidence::Check)
+            .map(|g| (entries_of(g), g.why.join(", ")))
+            .collect();
+        if !check.is_empty() {
+            let g = adw::PreferencesGroup::builder()
+                .title("Check These")
+                .description("They share a name or a number, but may be different people.")
+                .build();
+            for (members, why) in check {
+                let names: Vec<String> = members.iter().map(|e| e.contact.display_name()).collect();
+                let row = adw::ActionRow::builder()
+                    .title(glib::markup_escape_text(&names.join(" · ")).as_str())
+                    .subtitle(glib::markup_escape_text(&why).as_str())
+                    .build();
+                let apart = gtk::Button::builder()
+                    .label("Keep Apart")
+                    .valign(gtk::Align::Center)
+                    .build();
+                let merge = gtk::Button::builder().label("Merge").valign(gtk::Align::Center).build();
+                row.add_suffix(&apart);
+                row.add_suffix(&merge);
+                let (weak, d, m) = (Rc::downgrade(self), dialog.clone(), members.clone());
+                merge.connect_clicked(move |_| {
+                    let Some(this) = weak.upgrade() else { return };
+                    d.close();
+                    this.merge_groups(vec![m.clone()]);
+                });
+                let (weak, r) = (Rc::downgrade(self), row.clone());
+                apart.connect_clicked(move |_| {
+                    let Some(this) = weak.upgrade() else { return };
+                    let ids: Vec<String> = members.iter().map(Entry::id).collect();
+                    if let Some(root) = this.root.clone() {
+                        r.set_sensitive(false);
+                        let weak = Rc::downgrade(&this);
+                        background(
+                            move || dedupe::Apart::add(&root, &ids).map_err(|e| e.to_string()),
+                            move |result| {
+                                let Some(this) = weak.upgrade() else { return };
+                                match result {
+                                    Ok(Ok(())) => {
+                                        this.toast("Kept apart: not shown as duplicates again");
+                                        let shown = this.shown.borrow().clone();
+                                        this.show_duplicate_count(&shown);
+                                    }
+                                    Ok(Err(e)) | Err(e) => this.toast(&e),
+                                }
+                            },
+                        );
+                    }
+                });
+                g.add(&row);
+            }
+            page.add(&g);
+        }
+        if !across.is_empty() {
+            let g = adw::PreferencesGroup::builder()
+                .title("In Both Accounts")
+                .description("Mirroring iCloud and Google pairs these, keeping one in each account.")
+                .build();
+            for p in &across {
+                let (a, b) = (&shown.entries[p.a], &shown.entries[p.b]);
+                g.add(
+                    &adw::ActionRow::builder()
+                        .title(
+                            glib::markup_escape_text(&format!(
+                                "{} ({}) · {} ({})",
+                                a.contact.display_name(),
+                                a.label(),
+                                b.contact.display_name(),
+                                b.label()
+                            ))
+                            .as_str(),
+                        )
+                        .subtitle(glib::markup_escape_text(&p.why.join(", ")).as_str())
+                        .build(),
+                );
+            }
+            page.add(&g);
+        }
+        let view = adw::ToolbarView::new();
+        view.add_top_bar(&adw::HeaderBar::new());
+        if groups.is_empty() && across.is_empty() {
+            view.set_content(Some(
+                &adw::StatusPage::builder()
+                    .icon_name("avatar-default-symbolic")
+                    .title("No Duplicates")
+                    .build(),
+            ));
+        } else {
+            view.set_content(Some(&page));
+        }
+        dialog.set_child(Some(&view));
+        dialog.present(Some(&self.window));
+    }
+
+    /// Merges each group into its fullest card (see `dedupe::apply`), and
+    /// names the backup file.
+    fn merge_groups(self: &Rc<Self>, groups: Vec<Vec<Entry>>) {
+        let Some(root) = self.root.clone() else { return };
+        self.toast("Merging…");
+        self.write(
+            move |book| {
+                let mut backup = None;
+                let mut n = 0;
+                for g in &groups {
+                    let refs: Vec<&Entry> = g.iter().collect();
+                    let cards: Vec<&cloud_contacts::model::Contact> = g.iter().map(|e| &e.contact).collect();
+                    let done = dedupe::apply(book, &root, &refs, dedupe::keeper(&cards), false)?;
+                    backup = Some(done.backup);
+                    n += 1;
+                }
+                Ok((n, backup))
+            },
+            |this, (n, backup)| {
+                let home = std::env::var("HOME").unwrap_or_default();
+                let file = backup
+                    .map(|b| b.display().to_string())
+                    .map(|f| match f.strip_prefix(&home) {
+                        Some(rest) if !home.is_empty() => format!("~{rest}"),
+                        _ => f,
+                    })
+                    .unwrap_or_default();
+                this.toast(&format!(
+                    "Merged {n} group{}; the cards are saved in {file}",
+                    if n == 1 { "" } else { "s" }
+                ));
+                let shown = this.shown.borrow().clone();
+                this.show_duplicate_count(&shown);
+            },
+            |_| {},
         );
     }
 
@@ -1308,6 +1561,15 @@ fn build(app: &adw::Application, banner: SignInBanner) -> Window {
             .build(),
     );
     let accounts_menu = gio::Menu::new();
+    let main_menu = gio::Menu::new();
+    main_menu.append(Some("Duplicates…"), Some("win.duplicates"));
+    sidebar_header.pack_end(
+        &gtk::MenuButton::builder()
+            .icon_name("open-menu-symbolic")
+            .tooltip_text("Main Menu")
+            .menu_model(&main_menu)
+            .build(),
+    );
     sidebar_header.pack_end(
         &gtk::MenuButton::builder()
             .icon_name("system-users-symbolic")
@@ -1447,6 +1709,27 @@ fn build(app: &adw::Application, banner: SignInBanner) -> Window {
         .css_classes(["toolbar"])
         .build();
     body.append(&ks_offer);
+    let dup_label = gtk::Label::builder().hexpand(true).xalign(0.0).wrap(true).build();
+    let dup_box = gtk::Box::builder()
+        .spacing(12)
+        .margin_start(12)
+        .margin_end(12)
+        .margin_top(6)
+        .margin_bottom(6)
+        .build();
+    dup_box.append(&dup_label);
+    dup_box.append(
+        &gtk::Button::builder()
+            .label("Review…")
+            .action_name("win.duplicates")
+            .build(),
+    );
+    let dup_offer = gtk::Revealer::builder()
+        .child(&dup_box)
+        .reveal_child(false)
+        .css_classes(["toolbar"])
+        .build();
+    body.append(&dup_offer);
     split.set_vexpand(true);
     body.append(&split);
     // With no account linked: a page that links one.
@@ -1523,6 +1806,8 @@ fn build(app: &adw::Application, banner: SignInBanner) -> Window {
         ks_offer,
         ks_row,
         ks_quiet: Cell::new(false),
+        dup_offer,
+        dup_label,
     }
 }
 

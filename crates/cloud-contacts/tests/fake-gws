@@ -4,7 +4,8 @@ Contacts makes, on an address book kept in $FAKE_GWS_STATE (JSON).
 
 - `auth login`: prints a sign-in link and writes credentials.enc in
   $GOOGLE_WORKSPACE_CLI_CONFIG_DIR, as gws does.
-- `people people connections list|get|createContact|updateContact|deleteContact`
+- `people people connections list|get|createContact|updateContact|deleteContact`,
+  and `people contactGroups members modify` (adds memberships)
   with `--params JSON [--json BODY]`. updateContact refuses a stale etag as
   Google does (400 FAILED_PRECONDITION) and replaces exactly the fields in
   updatePersonFields.
@@ -47,8 +48,9 @@ if os.environ.get('FAKE_GWS_OFFLINE'):
     fail(4, 0, 'error sending request: dns error')
 if not os.path.isfile(os.path.join(conf, 'credentials.enc')):
     fail(2, 401, 'No credentials found')
-if args[:2] != ['people', 'people']:
+if args[:2] not in (['people', 'people'], ['people', 'contactGroups']):
     fail(3, 0, 'unknown command')
+resource = args[1]
 rest = args[2:]
 opts = {}
 i = 0
@@ -70,7 +72,19 @@ def stamp(p):
     p.setdefault('metadata', {})['sources'] = [{'type': 'CONTACT', 'updateTime': '2026-11-18T00:00:%02dZ' % (s['seq'] % 60)}]
     return p
 
-if method == ['connections', 'list']:
+if resource == 'contactGroups':
+    if method != ['members', 'modify']:
+        fail(3, 0, 'unknown method ' + ' '.join(method))
+    for name in body.get('resourceNamesToAdd', []):
+        p = people.get(name)
+        if p is None:
+            fail(1, 400, 'Invalid resource name', 'INVALID_ARGUMENT')
+        ms = p.setdefault('memberships', [])
+        if not any(m['contactGroupMembership']['contactGroupResourceName'] == params['resourceName'] for m in ms):
+            ms.append({'contactGroupMembership': {'contactGroupResourceName': params['resourceName']}})
+    save(s)
+    print('{}')
+elif method == ['connections', 'list']:
     names = sorted(people)
     size = int(os.environ.get('FAKE_GWS_PAGE', params.get('pageSize', 1000)))
     start = int(params.get('pageToken', 0))

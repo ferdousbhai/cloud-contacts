@@ -36,6 +36,12 @@ pub trait Provider: Send + Sync {
     fn update(&self, c: &Contact, changes: &[Change]) -> Result<Saved>;
     /// Deletes the contact `c`; answers why the cache may still show it.
     fn delete(&self, c: &Contact) -> Result<Option<String>>;
+    /// After `others` were merged into `kept` (and before they are
+    /// deleted): what the account keeps of them that a card does not carry.
+    /// Google: the contact groups they are in. Answers a warning, if any.
+    fn carry_over(&self, _kept: &Contact, _others: &[&Contact]) -> Result<Option<String>> {
+        Ok(None)
+    }
 }
 
 /// Cards added, changed (another etag) or gone between two caches.

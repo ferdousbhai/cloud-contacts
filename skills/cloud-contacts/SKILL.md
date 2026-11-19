@@ -70,9 +70,22 @@ cloud-contacts mirror on --yes      # only when the person asked to mirror them
 cloud-contacts mirror run           # mirror them now
 cloud-contacts mirror pair ICLOUD_ID GOOGLE_ID   # a waiting pair is one person
 cloud-contacts mirror apart ICLOUD_ID GOOGLE_ID  # ... or two
-cloud-contacts duplicates           # possible duplicates, within and across accounts
-cloud-contacts merge CONTACT CONTACT [--keep ACCOUNT] --yes
 ```
+
+## Duplicates
+
+```bash
+cloud-contacts duplicates                      # groups: confidence likely|check, why, merged preview; across accounts apart
+cloud-contacts merge --all --yes               # every likely group, within one account each
+cloud-contacts merge CONTACT CONTACT... --yes  # these into one (across two accounts: --keep ACCOUNT)
+cloud-contacts duplicates apart CONTACT CONTACT...   # different people: not shown again
+```
+
+A merge loses nothing (every phone, email, URL and address; the fuller name;
+the other's differing fields in the notes) and saves every card first to
+`merged-backup/<date>.vcf` in the data directory; the answer names it. Merge
+`likely` groups when the person asks to clean up duplicates; show `check`
+groups to the person and merge or keep apart only what they say.
 
 Check `cloud-contacts status` (its `mirror`) or `mirror` when asked whether
 it is on. Turn it on, call pairs, or merge only when the person asks. A run
