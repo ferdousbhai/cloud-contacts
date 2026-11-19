@@ -1574,10 +1574,9 @@ fn build(app: &gtk::Application, banner: SignInBanner) -> Window {
         .visible(false)
         .build();
     ks_list.append(&ks_row.widget);
-    // In a scrolled window, whose least height is the same at any width:
-    // omui's split, asked how tall it is for no width in particular, measures
-    // its panes at their natural width, where this title takes one line, and
-    // the window would then widen past a narrow tile for the title to fit so.
+    // In a scrolled window, whose least height is the same at any width: in
+    // a narrow tile too short for the sidebar, GTK would otherwise widen the
+    // window until this title takes one line less.
     sidebar_body.append(
         &gtk::ScrolledWindow::builder()
             .child(&ks_list)
