@@ -122,6 +122,16 @@ fi
 echo "Adding the [$REPO] repository"
 add_signed_repo "$REPO" "$RELEASES" "$SIGNING_KEY_FINGERPRINT"
 
+# Cloud Contacts takes over from iCloud for Omarchy's Contacts app (icloud-contacts):
+# the two conflict, and pacman answers its own "Remove icloud-contacts?" with no
+# when nobody is asked, so take the old one out first. Its data is a cache.
+if pacman -Qq icloud-contacts >/dev/null 2>&1; then
+  sudo=''
+  (( EUID == 0 )) || sudo=sudo
+  echo "Removing icloud-contacts: Cloud Contacts replaces it"
+  $sudo pacman -R --noconfirm icloud-contacts
+fi
+
 echo "Installing ${PACKAGES[*]}"
 if command -v omarchy-pkg-add >/dev/null; then
   # Omarchy refuses direct `pacman -Syu` (system upgrades go through `omarchy update`), so install
@@ -137,7 +147,7 @@ fi
 
 cat <<EOT
 
-Done. Launch "Cloud Contacts" from the app launcher (Super + Space), or run: cloud-contacts
+Done. Launch "Contacts" from the app launcher (Super + Space), or run: cloud-contacts
 Link accounts with: cloud-contacts account add icloud|google
 Updates arrive with the rest of the system: omarchy update (or pacman -Syu elsewhere)
 EOT

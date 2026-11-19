@@ -15,7 +15,7 @@ def executable(path, content):
 
 
 class InstallerTests(unittest.TestCase):
-    def run_installer(self, arch):
+    def run_installer(self, arch, old_installed=False):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             binary = root / 'bin'
@@ -35,8 +35,11 @@ class InstallerTests(unittest.TestCase):
             executable(binary / 'curl', 'while [[ $1 != -o ]]; do shift; done; echo public-key > "$2"\n')
             executable(binary / 'gpg', "printf 'pub:u:4096:1:A89CA1A6A1E74251:1:::u:::scESC:\\nfpr:::::::::52130299581DAD685226900CA89CA1A6A1E74251:\\n'\n")
             executable(binary / 'getent', f"echo 'root:x:0:0::{home}:/bin/bash'\n")
-            for command in ('pacman-key', 'pacman', 'omarchy-pkg-add'):
+            for command in ('pacman-key', 'omarchy-pkg-add'):
                 executable(binary / command, 'echo "$0 $*" >> "$CALL_LOG"\n')
+            # -Q answers for icloud-contacts only when it is installed
+            executable(binary / 'pacman', 'echo "$0 $*" >> "$CALL_LOG"\n'
+                       'if [[ $1 == -Qq ]]; then [[ -n ${OLD_INSTALLED:-} ]]; fi\n')
             source = (ROOT / 'packaging/repo/install.sh').read_text().replace('/etc/', f'{etc}/')
             # Existing include must use the same fixture path as the transformed installer.
             (etc / 'pacman.conf').write_text(f'Include = {etc}/pacman.d/cloud-contacts.conf\n[other]\n')
@@ -44,6 +47,8 @@ class InstallerTests(unittest.TestCase):
             script.write_text(source)
             log = root / 'calls'
             env = dict(os.environ, PATH=f'{binary}:{os.environ["PATH"]}', CALL_LOG=str(log), USER='root', SUDO_USER='root')
+            if old_installed:
+                env['OLD_INSTALLED'] = '1'
             result = subprocess.run(['bash', str(script)], env=env, capture_output=True, text=True)
             if arch not in ('x86_64', 'aarch64'):
                 self.assertNotEqual(result.returncode, 0)
@@ -53,7 +58,16 @@ class InstallerTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             repo = 'cloud-contacts-aarch64' if arch == 'aarch64' else 'cloud-contacts'
             self.assertIn(f'[{repo}]', (etc / f'pacman.d/{repo}.conf').read_text())
+            calls = log.read_text().splitlines()
             self.assertIn('cloud-contacts', log.read_text())
+            removals = [i for i, c in enumerate(calls) if c.endswith('pacman -R --noconfirm icloud-contacts')]
+            installs = [i for i, c in enumerate(calls) if c.endswith(' cloud-contacts') and '-R' not in c]
+            if old_installed:
+                # pacman says no to a conflict nobody is asked about: the old app goes first
+                self.assertEqual(len(removals), 1, calls)
+                self.assertLess(removals[0], installs[0], calls)
+            else:
+                self.assertEqual(removals, [], calls)
             self.assertTrue((hook / repo).exists())
             if arch == 'aarch64':
                 self.assertFalse((hook / 'cloud-contacts').exists())
@@ -63,6 +77,7 @@ class InstallerTests(unittest.TestCase):
     def test_x86(self): self.run_installer('x86_64')
     def test_arm_migration(self): self.run_installer('aarch64')
     def test_unsupported(self): self.run_installer('riscv64')
+    def test_takes_over_icloud_contacts(self): self.run_installer('aarch64', old_installed=True)
 
 
 class VerificationTests(unittest.TestCase):
