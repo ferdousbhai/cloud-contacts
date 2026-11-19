@@ -1596,7 +1596,7 @@ fn build(app: &gtk::Application, banner: SignInBanner) -> Window {
     edit_button.set_action_name(Some("win.edit"));
     let delete_button = omui::icon_button(name::DELETE, "Delete");
     delete_button.set_action_name(Some("win.delete"));
-    let content_header = omui::header(Some(gtk::Box::new(gtk::Orientation::Horizontal, 0).upcast_ref()));
+    let content_header = omui::header_without_title();
     content_header.pack_start(&back);
     content_header.pack_end(&delete_button);
     content_header.pack_end(&edit_button);
