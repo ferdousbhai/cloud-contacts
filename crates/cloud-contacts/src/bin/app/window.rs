@@ -1513,6 +1513,9 @@ fn contact_row(e: &Entry, several: bool) -> gtk::ListBoxRow {
     }
     b.append(&text);
     let row = gtk::ListBoxRow::builder().child(&b).build();
+    // A screen reader would otherwise read the avatar's initials first.
+    let spoken = if sub.is_empty() { name } else { format!("{name}, {sub}") };
+    row.update_property(&[gtk::accessible::Property::Label(&spoken)]);
     row.set_widget_name(&e.id());
     row
 }
