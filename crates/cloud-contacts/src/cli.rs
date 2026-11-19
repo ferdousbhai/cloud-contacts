@@ -150,12 +150,13 @@ enum Command {
     },
     /// Contacts that may be one person, in groups: those likely the same (`merge --all` merges them), those to check, and pairs across accounts.
     ///
-    /// Likely: the same name and a shared phone or email; a shared phone or
-    /// email and one name inside the other; or the same full name with
-    /// nothing against it. Check: anything else found (one first name and
-    /// different numbers, different names sharing a number). Contacts called
-    /// different people (`duplicates apart`) are not shown again. A pair in
-    /// two accounts is listed apart: mirroring pairs those.
+    /// Likely: a shared phone or email and the same name or one inside the
+    /// other; or the same full name with nothing against it. Check, a pair
+    /// at a time: different names sharing a phone or email, or the same
+    /// name with different numbers. One name inside another with nothing
+    /// shared is not reported. Only likely pairs join cards into groups.
+    /// Contacts called different people (`duplicates apart`) are not shown
+    /// again. A pair in two accounts is listed apart: mirroring pairs those.
     ///
     /// JSON: {groups: [{confidence: "likely"|"check", members: [{id, name}],
     /// keep, why, merged}], across: [{a, b, names, why}]}; `merged` is the

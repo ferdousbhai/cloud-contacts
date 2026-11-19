@@ -502,7 +502,7 @@ fn merge_all_within_an_account_loses_nothing() {
         "people/c6".into(),
         json!({
             "resourceName": "people/c6", "etag": "g6",
-            "names": [{"givenName": "Nia", "familyName": "Bell"}],
+            "names": [{"givenName": "Nia"}],
             "phoneNumbers": [{"value": "+44 7700 900002", "type": "mobile"}],
         }),
     );

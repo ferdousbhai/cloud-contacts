@@ -83,13 +83,15 @@ cloud-contacts mirror off      # both accounts keep their contacts as they are
 
 Cloud Contacts finds contacts that may be one person and merges them for you, losing nothing.
 The window says how many look like duplicates, above the contacts; Review… (or Duplicates… in
-the main menu) shows them:
+the main menu, beside Refresh) shows them:
 
-- **Likely the same**: the same name and a shared phone or email; a shared phone or email and
-  one name inside the other (Marco and Marco Gomez); or the same full name with nothing against
-  it. Merge All merges them, each group into one card.
-- **Check these**: one first name with different numbers, or different names sharing a number.
-  Merge, or Keep Apart (they are not shown again).
+- **Likely the same**: a shared phone or email and the same name, or one name inside the other
+  (Marco and Marco Gomez); or the same full name with nothing against it (case, punctuation,
+  spaces and accents aside). Merge All merges them, each group into one card.
+- **Check these**, a pair at a time: different names sharing a phone or email, the same
+  one-word name with different numbers, or the same full name with different numbers. Merge,
+  or Keep Apart (they are not shown again). A first name inside a fuller one with nothing in
+  common (Jack and Jack (Club)) is not a duplicate.
 - **In both accounts**: one in iCloud and one in Google; mirroring pairs these.
 
 ```sh

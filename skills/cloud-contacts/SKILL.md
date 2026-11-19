@@ -75,7 +75,7 @@ cloud-contacts mirror apart ICLOUD_ID GOOGLE_ID  # ... or two
 ## Duplicates
 
 ```bash
-cloud-contacts duplicates                      # groups: confidence likely|check, why, merged preview; across accounts apart
+cloud-contacts duplicates                      # likely groups, check pairs, why, merged preview; across accounts apart
 cloud-contacts merge --all --yes               # every likely group, within one account each
 cloud-contacts merge CONTACT CONTACT... --yes  # these into one (across two accounts: --keep ACCOUNT)
 cloud-contacts duplicates apart CONTACT CONTACT...   # different people: not shown again

@@ -1553,23 +1553,19 @@ fn build(app: &adw::Application, banner: SignInBanner) -> Window {
             .build(),
     ));
     let sidebar_header = adw::HeaderBar::new();
-    sidebar_header.pack_start(
-        &gtk::Button::builder()
-            .icon_name("view-refresh-symbolic")
-            .tooltip_text("Refresh (Ctrl+R)")
-            .action_name("win.refresh")
-            .build(),
-    );
-    let accounts_menu = gio::Menu::new();
+    // Refresh (Ctrl+R) and Duplicates in one menu: with three buttons the
+    // sidebar still has room to say "Contacts"
     let main_menu = gio::Menu::new();
+    main_menu.append(Some("Refresh"), Some("win.refresh"));
     main_menu.append(Some("Duplicates…"), Some("win.duplicates"));
-    sidebar_header.pack_end(
+    sidebar_header.pack_start(
         &gtk::MenuButton::builder()
             .icon_name("open-menu-symbolic")
             .tooltip_text("Main Menu")
             .menu_model(&main_menu)
             .build(),
     );
+    let accounts_menu = gio::Menu::new();
     sidebar_header.pack_end(
         &gtk::MenuButton::builder()
             .icon_name("system-users-symbolic")

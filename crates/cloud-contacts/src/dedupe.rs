@@ -3,23 +3,28 @@
 //!
 //! **Finding.** Contacts are indexed by email, by phone (its last seven
 //! digits, then compared as [`model::same_number`] does, so a local
-//! `0408 400701` meets `+358 40 8400701`), by full name, and, for a card
-//! named by one word only, by that word as a first name. Each pair found is
-//! an edge, *likely* or *check*:
+//! `0408 400701` meets `+358 40 8400701`) and by full name (case,
+//! punctuation, spaces and accents aside: `Cold Room` is `Coldroom`). A
+//! pair found is *likely* or *check*:
 //!
-//! - likely: the same name (case and punctuation aside) and a shared phone
-//!   or email; or a shared phone or email and one name inside the other
-//!   (`Marco` in `Marco Gomez`); or the same full name of two parts or more
-//!   (or the same company) with nothing against it (no different birthdays,
-//!   no phones of both that differ, no emails of both that differ);
-//! - check: everything else found (one first name and different numbers,
-//!   different names sharing a number).
+//! - likely: a shared phone or email and the same name, or one name inside
+//!   the other (`Marco` in `Marco Gomez`); or the same full name of two
+//!   parts or more (or the same company) with nothing against it (no
+//!   different birthdays, no phones of both that differ, no emails of both
+//!   that differ);
+//! - check: a shared phone or email and different names; the same
+//!   one-word name and no shared phone or email; the same full name with
+//!   something against it.
 //!
-//! Groups are the connected sets of edges (A~B and B~C make one group of
-//! three). A group joined by likely edges only is likely; any other is
-//! check. Pairs the person called different people ([`apart`]) are no
-//! edge. Only contacts of one account form groups; a pair across accounts
-//! is listed apart, as mirroring pairs those.
+//! One name inside another (`Jack` and `Jack (Club)`) with nothing shared
+//! is no reason at all: first names are common.
+//!
+//! Groups are the sets joined by likely pairs (A~B and B~C make one group of
+//! three). A check pair joins nothing: it is listed on its own, to merge or
+//! keep apart, unless both are in one likely group already. Pairs the
+//! person called different people ([`Apart`]) are not found. Only contacts
+//! of one account form groups; a pair across accounts is listed apart, by
+//! the same rules, as mirroring pairs those.
 //!
 //! **Merging** ([`merge_into`]) never loses what either card says: phones,
 //! emails, URLs and addresses are joined, without the same one twice; the
@@ -77,7 +82,36 @@ pub struct Across {
 /// Letters and digits only, lowercased: `St. Pierre` and `St-Pierre` are
 /// one name.
 pub fn compact(s: &str) -> String {
-    model::fold(s).chars().filter(|c| c.is_alphanumeric()).collect()
+    model::fold(s)
+        .chars()
+        .map(plain)
+        .filter(|c| c.is_alphanumeric())
+        .collect()
+}
+
+/// A Latin letter without its accent (`é` is `e`); any other as it is.
+fn plain(c: char) -> char {
+    const LETTERS: [(char, &str); 15] = [
+        ('a', "àáâãäåāăą"),
+        ('c', "çćč"),
+        ('d', "ďđ"),
+        ('e', "èéêëēėęě"),
+        ('g', "ğ"),
+        ('i', "ìíîïīįı"),
+        ('l', "ľĺł"),
+        ('n', "ñńň"),
+        ('o', "òóôõöøōő"),
+        ('r', "řŕ"),
+        ('s', "śšş"),
+        ('t', "ţť"),
+        ('u', "ùúûüūůűų"),
+        ('y', "ýÿ"),
+        ('z', "žźż"),
+    ];
+    LETTERS
+        .iter()
+        .find(|(_, accented)| accented.contains(c))
+        .map_or(c, |(base, _)| *base)
 }
 
 fn words(s: &str) -> Vec<String> {
@@ -147,40 +181,45 @@ fn name_within(a: &str, b: &str) -> bool {
 }
 
 /// Why `a` and `b` may be one person, and how sure: `None` when nothing
-/// joins them.
+/// joins them (see the module's header).
 pub fn edge(a: &Contact, b: &Contact) -> Option<(Confidence, Vec<String>)> {
     let (na, nb) = (name_of(a), name_of(b));
-    let same_name = !na.is_empty() && compact(&na) == compact(&nb);
+    let same_name = !compact(&na).is_empty() && compact(&na) == compact(&nb);
     let shared = shared_values(a, b);
     let within = name_within(&na, &nb);
-    let first_alone = |x: &Contact, y: &Contact| {
-        words(&name_of(x)).len() == 1 && compact(x.field(Field::First)) == compact(y.field(Field::First))
-    };
     let conflict = differ(a, b, Multi::Phone)
         || differ(a, b, Multi::Email)
         || (!a.field(Field::Birthday).is_empty()
             && !b.field(Field::Birthday).is_empty()
             && a.field(Field::Birthday) != b.field(Field::Birthday));
-    let full_name = words(&na).len() >= 2 || (a.is_company() && b.is_company());
+    // either way round: `Cold Room` and `Coldroom` are one full name
+    let full_name = words(&na).len().max(words(&nb).len()) >= 2 || (a.is_company() && b.is_company());
     let mut why = shared.clone();
     if same_name {
         why.push(format!("name {}", na.trim()));
-    } else if within {
+    } else if within && !shared.is_empty() {
         why.push(format!("names {} and {}", na.trim(), nb.trim()));
     }
-    let likely =
-        (same_name && !shared.is_empty()) || (!shared.is_empty() && within) || (same_name && full_name && !conflict);
-    if likely {
-        return Some((Confidence::Likely, why));
+    if !shared.is_empty() {
+        let conf = if same_name || within {
+            Confidence::Likely
+        } else {
+            Confidence::Check
+        };
+        return Some((conf, why));
     }
-    let found = !shared.is_empty() || same_name || within || first_alone(a, b) || first_alone(b, a);
-    if !found {
+    if !same_name {
+        // one name inside another, alone, is nothing: first names are common
         return None;
     }
-    if why.is_empty() {
-        why.push(format!("names {} and {}", na.trim(), nb.trim()));
-    }
-    Some((Confidence::Check, why))
+    Some((
+        if full_name && !conflict {
+            Confidence::Likely
+        } else {
+            Confidence::Check
+        },
+        why,
+    ))
 }
 
 /// The keys a card is looked up by, so a large book is not compared pair by
@@ -195,17 +234,9 @@ fn keys(c: &Contact) -> Vec<String> {
         let d = model::digits(&v.value);
         (d.len() >= 7).then(|| format!("p:{}", &d[d.len() - 7..]))
     }));
-    let name = name_of(c);
-    let w = words(&name);
-    if !w.is_empty() {
-        k.push(format!("n:{}", compact(&name)));
-        // a one-word name meets every card of that first name, and
-        // one name inside another meets it by its last word
-        k.push(format!("f:{}", compact(c.field(Field::First))));
-        if w.len() == 1 {
-            k.push(format!("f:{}", w[0]));
-        }
-        k.push(format!("l:{}", w[w.len() - 1]));
+    let name = compact(&name_of(c));
+    if !name.is_empty() {
+        k.push(format!("n:{name}"));
     }
     k.retain(|x| !x.ends_with(':'));
     k.sort();
@@ -227,7 +258,7 @@ pub fn find(entries: &[Entry], apart: &Apart, linked: &BTreeSet<(String, String)
     let mut edges: Vec<(usize, usize, Confidence, Vec<String>)> = Vec::new();
     let mut across = Vec::new();
     for bucket in index.values() {
-        // a first name everyone has is no reason on its own
+        // a key hundreds share (a company's switchboard) is no reason alone
         if bucket.len() > 200 {
             continue;
         }
@@ -252,7 +283,7 @@ pub fn find(entries: &[Entry], apart: &Apart, linked: &BTreeSet<(String, String)
             }
         }
     }
-    // connected sets
+    // groups: joined by likely pairs only
     let mut parent: Vec<usize> = (0..entries.len()).collect();
     fn root(p: &mut [usize], mut x: usize) -> usize {
         while p[x] != x {
@@ -261,14 +292,29 @@ pub fn find(entries: &[Entry], apart: &Apart, linked: &BTreeSet<(String, String)
         }
         x
     }
-    for (a, b, _, _) in &edges {
+    for (a, b, conf, _) in &edges {
+        if *conf != Confidence::Likely {
+            continue;
+        }
         let (ra, rb) = (root(&mut parent, *a), root(&mut parent, *b));
         if ra != rb {
             parent[ra.max(rb)] = ra.min(rb);
         }
     }
     let mut groups: BTreeMap<usize, Group> = BTreeMap::new();
+    let mut pairs: Vec<Group> = Vec::new();
     for (a, b, conf, why) in edges {
+        if conf == Confidence::Check {
+            // a pair of its own, unless one likely group holds both already
+            if root(&mut parent, a) != root(&mut parent, b) {
+                pairs.push(Group {
+                    members: vec![a, b],
+                    confidence: Confidence::Check,
+                    why,
+                });
+            }
+            continue;
+        }
         let r = root(&mut parent, a);
         let g = groups.entry(r).or_insert_with(|| Group {
             members: Vec::new(),
@@ -280,14 +326,13 @@ pub fn find(entries: &[Entry], apart: &Apart, linked: &BTreeSet<(String, String)
                 g.members.push(m);
             }
         }
-        g.confidence = g.confidence.max(conf);
         for w in why {
             if !g.why.contains(&w) {
                 g.why.push(w);
             }
         }
     }
-    let mut out: Vec<Group> = groups.into_values().collect();
+    let mut out: Vec<Group> = groups.into_values().chain(pairs).collect();
     for g in &mut out {
         g.members.sort_by_key(|&m| entries[m].contact.sort_key());
     }
@@ -838,10 +883,10 @@ mod tests {
     }
 
     #[test]
-    fn a_first_name_alone_is_a_check_and_apart_is_remembered() {
+    fn the_same_first_name_alone_is_a_check_and_apart_is_remembered() {
         let e = entries(vec![
             card(&[first("Nadia"), phone("+44 7700 900111")]),
-            card(&[first("Nadia"), last("Hart"), phone("+44 7700 900222")]),
+            card(&[first("nádia"), phone("+44 7700 900222")]),
         ]);
         let (groups, _) = find(&e, &Apart::default(), &BTreeSet::new());
         assert_eq!(groups.len(), 1);
@@ -850,6 +895,61 @@ mod tests {
         Apart::add(dir.path(), &[e[0].id(), e[1].id()]).unwrap();
         let apart = Apart::load(dir.path()).unwrap();
         assert!(find(&e, &apart, &BTreeSet::new()).0.is_empty());
+    }
+
+    /// A first name inside fuller names is no reason on its own: four Sams
+    /// with their own numbers are four people.
+    #[test]
+    fn first_names_inside_others_are_not_duplicates() {
+        let e = entries(vec![
+            card(&[first("Sam"), phone("+61 400 000 001")]),
+            card(&[first("Sam"), last("Gasparro"), phone("+61 400 000 002")]),
+            card(&[first("Sam (Dep Owner)"), phone("+61 400 000 003")]),
+            card(&[first("Sam (Bitcoin Trader)"), phone("+61 400 000 004")]),
+            card(&[first("Jack"), phone("+1 555 020 0001")]),
+            card(&[first("Jack (Club)"), phone("+1 555 020 0002")]),
+        ]);
+        let (groups, across) = find(&e, &Apart::default(), &BTreeSet::new());
+        assert!(groups.is_empty(), "{groups:?}");
+        assert!(across.is_empty());
+        assert!(edge(&e[4].contact, &e[5].contact).is_none());
+    }
+
+    /// A check pair joins nothing: the likely group stays as it is, and the
+    /// third card is a pair of its own.
+    #[test]
+    fn a_check_pair_never_pulls_a_third_card_in() {
+        let e = entries(vec![
+            card(&[first("Lee"), last("Ford"), phone("+1 555 030 0001")]),
+            card(&[
+                first("Lee"),
+                last("Ford"),
+                phone("555 030 0001"),
+                email("lee@example.com"),
+            ]),
+            card(&[first("Toronto"), last("Office"), email("lee@example.com")]),
+        ]);
+        let (groups, _) = find(&e, &Apart::default(), &BTreeSet::new());
+        assert_eq!(groups.len(), 2, "{groups:?}");
+        let likely = groups.iter().find(|g| g.confidence == Confidence::Likely).unwrap();
+        assert_eq!(likely.members.len(), 2);
+        assert!(!likely.members.contains(&2));
+        let check = groups.iter().find(|g| g.confidence == Confidence::Check).unwrap();
+        assert_eq!(check.members, vec![1, 2]);
+    }
+
+    #[test]
+    fn spaces_punctuation_and_accents_make_no_other_name() {
+        assert_eq!(compact("Cold Room"), compact("Coldroom"));
+        assert_eq!(compact("José Núñez"), compact("Jose Nunez"));
+        assert_eq!(compact("Zoë-Łucja"), compact("zoe lucja"));
+        let (one, two) = (card(&[first("Coldroom")]), card(&[first("Cold"), last("Room")]));
+        assert_eq!(edge(&one, &two).map(|e| e.0), Some(Confidence::Likely));
+        assert_eq!(
+            edge(&two, &one).map(|e| e.0),
+            Some(Confidence::Likely),
+            "either way round"
+        );
     }
 
     #[test]
