@@ -10,6 +10,7 @@ set -Eeuo pipefail
 # Each scene is written as <out-dir>/<scene>-<theme>.png. Both an iCloud and a Google account are linked, and Google
 # holds two cards for one person, so the offers to mirror and to merge duplicates show.
 #   list        the window as it opens: the contacts, the first one's card (in a narrow window: the list alone)
+#   typing      "Ann" typed as the window opens: the search has the keyboard and filters the list
 #   card        Ann Lee found by her work number and opened (in a narrow window: her card in the list's place)
 #   back        the same, then Escape: in a narrow window, back to the list
 #   menu        the accounts menu open
@@ -46,13 +47,14 @@ done
 for theme in "${themes[@]}"; do
   [[ -z $theme || -f $theme/colors.toml ]] || { echo "preview: $theme has no colors.toml" >&2; exit 1; }
 done
-read -r -a scenes <<< "${CLOUD_CONTACTS_PREVIEW_SCENES:-list card back menu new typed edit duplicates review welcome}"
+read -r -a scenes <<< "${CLOUD_CONTACTS_PREVIEW_SCENES:-list typing card back menu new typed edit duplicates review welcome}"
 # `action:<name>[=<string>]` activates the window's action <name> over the scratch session bus, as its menus and
 # shortcuts do; `text:<words>` types them (an underscore is a space); the rest are keys, with modifiers named before
 # them held. The search keeps the keyboard after a search; New Contact opens with it on the account; the accounts
 # menu is two stops before the search (shift+Tab is ISO_Left_Tab); Unlink is Alt+U.
 declare -A keys=(
   [list]=""
+  [typing]="text:Ann"
   [card]="action:find text:0199 Return"
   [back]="action:find text:0199 Return Escape"
   [menu]="action:find shift+ISO_Left_Tab shift+ISO_Left_Tab space"
@@ -190,7 +192,8 @@ printf '%s\n' \
   '})' \
   'hl.window_rule({ match = { class = ".*" }, monitor = "preview" })' > "$root/hyprland.lua"
 unset HYPRLAND_INSTANCE_SIGNATURE
-/usr/bin/setsid /usr/bin/env WAYLAND_DISPLAY="$parent_socket" /usr/bin/Hyprland --config "$root/hyprland.lua" > "$root/hyprland.log" 2>&1 &
+# Its shader cache is kept out of HOME, which each theme starts afresh while the compositor runs.
+/usr/bin/setsid /usr/bin/env WAYLAND_DISPLAY="$parent_socket" XDG_CACHE_HOME="$root/hyprland-cache" /usr/bin/Hyprland --config "$root/hyprland.lua" > "$root/hyprland.log" 2>&1 &
 hypr_pid=$!
 signature=""
 display=""

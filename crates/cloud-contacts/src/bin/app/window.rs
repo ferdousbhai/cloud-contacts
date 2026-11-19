@@ -117,6 +117,9 @@ impl Window {
 
     pub fn present(&self) {
         self.window.present();
+        // Typing a name filters the list at once; GTK's own first focus
+        // would be the header's menu button.
+        self.search.grab_focus();
     }
 
     fn toast(&self, msg: &str) {
