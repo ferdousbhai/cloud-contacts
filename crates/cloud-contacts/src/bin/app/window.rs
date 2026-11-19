@@ -30,10 +30,6 @@ use cloud_contacts::store::Store;
 use icloud_app_ui::SignInBanner;
 
 const FETCH_SECS: u32 = 300;
-/// The width of a dialog's form where the window has room, about that of
-/// libadwaita's alert dialogs: its wrapped text would otherwise widen it to
-/// one long line.
-const DIALOG_WIDTH: i32 = 360;
 
 pub struct Window {
     window: gtk::ApplicationWindow,
@@ -928,7 +924,6 @@ impl Window {
         }
         let dialog = omui::Dialog::new(Some("Mirror Contacts Between iCloud and Google"), None);
         dialog.set_extra_child(Some(body.upcast_ref()));
-        dialog.set_content_size(DIALOG_WIDTH, -1);
         dialog.add_response("cancel", "_Cancel");
         dialog.add_response("on", "_Turn On");
         dialog.set_response_appearance("on", omui::Appearance::Suggested);
@@ -1162,7 +1157,6 @@ impl Window {
                 .build()
                 .upcast_ref(),
         ));
-        dialog.set_content_size(DIALOG_WIDTH, -1);
         dialog.add_response("cancel", "_Cancel");
         dialog.add_response("save", "_Save");
         dialog.set_response_appearance("save", omui::Appearance::Suggested);
