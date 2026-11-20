@@ -7,7 +7,7 @@
 {"do":"shot","path":"mirror-review.png"}
 {"do":"click","role":"button","name":"Cancel"}
 {"do":"wait","dialog":null}
-{"do":"wait","role":"switch","in":{"role":"list-item","name":"Mirror contacts between iCloud and Google"},"checked":false}
+{"do":"wait","role":"switch","name":"Mirror contacts between iCloud and Google","checked":false}
 
 # Not Now puts the offer away.
 {"do":"click","role":"button","name":"Not Now"}
@@ -23,8 +23,12 @@
 {"do":"click","role":"button","name":"Close"}
 {"do":"wait","dialog":null}
 
-# Merge All leaves one Gus Grant (two rows of one name would be an error here), and the offer to review goes.
-{"do":"click","role":"button","name":"Review…"}
+# The main menu's Duplicates…, by the keyboard: the menu opens on Refresh, and Down and Enter choose it. Merge All
+# leaves one Gus Grant (two rows of one name would be an error here), and the offer to review goes.
+{"do":"click","role":"button","name":"Main Menu"}
+{"do":"wait","focus":{"role":"menu-item","name":"Refresh"}}
+{"do":"key","keys":"Down"}
+{"do":"key","keys":"Return"}
 {"do":"wait","dialog":"Duplicates"}
 {"do":"click","role":"button","name":"Merge All"}
 {"do":"wait","dialog":null}
@@ -32,14 +36,26 @@
 {"do":"wait","role":"list-item","name":"Gus Grant, Google","visible":true}
 {"do":"shot","path":"mirror-merged.png"}
 
-# The switch below the contacts turns mirroring on through the same review, and off again.
-{"do":"set","role":"switch","in":{"role":"list-item","name":"Mirror contacts between iCloud and Google"},"checked":true}
+# The switch below the contacts turns mirroring on through the same review, where the two Ann Lees are called one
+# person in their row's drop-down. Each account then has the other's contacts, a company as a company, and one Ann
+# Lee. Off again leaves them so.
+{"do":"set","role":"switch","name":"Mirror contacts between iCloud and Google","checked":true}
 {"do":"wait","dialog":"Mirror Contacts Between iCloud and Google"}
+{"do":"click","role":"combo-box","name":"Ann Lee (iCloud) · Ann Lee (Google)"}
+{"do":"wait","focus":{"role":"list-item","name":"Decide Later"}}
+{"do":"key","keys":"Down"}
+{"do":"key","keys":"Return"}
+{"do":"wait","focus":{"role":"combo-box","name":"Ann Lee (iCloud) · Ann Lee (Google)"}}
+{"do":"shot","path":"mirror-same.png"}
 {"do":"click","role":"button","name":"Turn On"}
 {"do":"wait","dialog":null}
-{"do":"wait","role":"switch","in":{"role":"list-item","name":"Mirror contacts between iCloud and Google"},"checked":true}
+{"do":"wait","role":"list-item","name":"Acme Hardware, Google","visible":true}
+{"do":"wait","role":"list-item","name":"Bob Berg, Google","visible":true}
+{"do":"wait","role":"list-item","name":"Ann Lee, Acme · Google","visible":true}
+{"do":"wait","role":"list-item","name":"Ann Lee, Google Ann Co · Google","visible":false}
+{"do":"wait","role":"switch","name":"Mirror contacts between iCloud and Google","checked":true}
 {"do":"shot","path":"mirror-on.png"}
-{"do":"set","role":"switch","in":{"role":"list-item","name":"Mirror contacts between iCloud and Google"},"checked":false}
+{"do":"set","role":"switch","name":"Mirror contacts between iCloud and Google","checked":false}
 {"do":"wait","toasts":["Turned off: both accounts keep their contacts as they are"]}
-{"do":"wait","role":"switch","in":{"role":"list-item","name":"Mirror contacts between iCloud and Google"},"checked":false}
+{"do":"wait","role":"switch","name":"Mirror contacts between iCloud and Google","checked":false}
 {"do":"quit"}

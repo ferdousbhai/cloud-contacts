@@ -40,6 +40,21 @@
 {"do":"key","keys":"BackSpace"}
 {"do":"wait","role":"list-item","name":"Bob Berg, iCloud","visible":true}
 
+# The account filter's drop-down, by the keyboard: Down and Enter show Google's contacts alone, Up and Enter every
+# account again.
+{"do":"click","role":"combo-box","name":"Show one account's contacts"}
+{"do":"wait","focus":{"role":"list-item","name":"All Accounts"}}
+{"do":"key","keys":"Down"}
+{"do":"key","keys":"Return"}
+{"do":"wait","role":"list-item","name":"Bob Berg, iCloud","visible":false}
+{"do":"wait","role":"list-item","name":"Ann Lee, Google Ann Co · Google","visible":true}
+{"do":"shot","path":"browse-google.png"}
+{"do":"click","role":"combo-box","name":"Show one account's contacts"}
+{"do":"key","keys":"Up"}
+{"do":"wait","focus":{"role":"list-item","name":"All Accounts"}}
+{"do":"key","keys":"Return"}
+{"do":"wait","role":"list-item","name":"Bob Berg, iCloud","visible":true}
+
 # A narrow window shows the list alone; a contact opens in its place, and the back button returns.
 {"do":"resize","width":420,"height":720}
 {"do":"wait","size":[420,720]}
