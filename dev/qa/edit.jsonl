@@ -25,11 +25,14 @@
 {"do":"wait","role":"label","name":"In Google","visible":true}
 {"do":"wait","role":"label","name":"+1 555 0123","visible":true}
 
-# A birthday that is not a date holds Save back; a good one lets it through, and the card shows it.
+# A birthday that is not a date holds Save back, and why is said under the fields, where they do not scroll it out
+# of sight; a good one lets it through, and the card shows it.
 {"do":"click","role":"button","name":"Edit (Ctrl+E)"}
 {"do":"wait","dialog":"Edit Contact"}
 {"do":"type","role":"text-box","name":"Birthday (1990-05-01, or 05-01)","text":"soon"}
 {"do":"wait","role":"button","name":"Save","sensitive":false}
+{"do":"wait","role":"label","name":"birthday \"soon\": use YYYY-MM-DD, or MM-DD without a year","visible":true}
+{"do":"wait","role":"label","name":"birthday \"soon\": use YYYY-MM-DD, or MM-DD without a year","in":{"role":"form","name":"Fields"},"visible":false}
 {"do":"shot","path":"edit-problem.png"}
 {"do":"key","keys":"<Control>a"}
 {"do":"type","role":"text-box","name":"Birthday (1990-05-01, or 05-01)","text":"1815-12-10"}

@@ -1149,16 +1149,20 @@ impl Window {
             .wrap(true)
             .visible(false)
             .build();
-        body.append(&problem);
-        dialog.set_extra_child(Some(
-            gtk::ScrolledWindow::builder()
-                .child(&body)
-                .hscrollbar_policy(gtk::PolicyType::Never)
-                .propagate_natural_height(true)
-                .max_content_height(520)
-                .build()
-                .upcast_ref(),
-        ));
+        // The fields scroll; what is wrong with them stays under them, over the Save it holds back. At the end of
+        // the fields it was out of sight below them, and Save was off for no reason one could see.
+        let fields = gtk::ScrolledWindow::builder()
+            .child(&body)
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .propagate_natural_height(true)
+            .max_content_height(520)
+            .accessible_role(gtk::AccessibleRole::Form)
+            .build();
+        fields.update_property(&[gtk::accessible::Property::Label("Fields")]);
+        let content = gtk::Box::new(gtk::Orientation::Vertical, 12);
+        content.append(&fields);
+        content.append(&problem);
+        dialog.set_extra_child(Some(content.upcast_ref()));
         dialog.add_response("cancel", "_Cancel");
         dialog.add_response("save", "_Save");
         dialog.set_response_appearance("save", omui::Appearance::Suggested);
