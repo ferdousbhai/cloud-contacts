@@ -18,7 +18,7 @@
 {"do":"type","role":"text-box","name":"Last name","text":"Lovelace"}
 {"do":"type","role":"text-box","name":"Company","text":"Analytical Engines"}
 {"do":"shot","path":"edit-new.png"}
-{"do":"click","role":"button","name":"Save"}
+{"do":"key","keys":"Return"}
 {"do":"wait","dialog":null}
 {"do":"wait","toasts":["Added Ada Lovelace"]}
 {"do":"wait","role":"list-item","name":"Ada Lovelace, Analytical Engines · Google","visible":true}
@@ -32,6 +32,8 @@
 {"do":"type","role":"text-box","name":"Birthday (1990-05-01, or 05-01)","text":"soon"}
 {"do":"wait","role":"button","name":"Save","sensitive":false}
 {"do":"wait","role":"label","name":"birthday \"soon\": use YYYY-MM-DD, or MM-DD without a year","visible":true}
+{"do":"key","keys":"Return"}
+{"do":"wait","dialog":"Edit Contact"}
 {"do":"wait","role":"label","name":"birthday \"soon\": use YYYY-MM-DD, or MM-DD without a year","in":{"role":"form","name":"Fields"},"visible":false}
 {"do":"shot","path":"edit-problem.png"}
 {"do":"key","keys":"<Control>a"}

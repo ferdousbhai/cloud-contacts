@@ -1106,6 +1106,10 @@ impl Window {
         group(&scalars[..3].iter().map(|(_, (r, _))| r).collect::<Vec<_>>());
         group(&scalars[3..].iter().map(|(_, (r, _))| r).collect::<Vec<_>>());
         let scalars: Vec<(Field, gtk::Entry)> = scalars.into_iter().map(|(f, (_, e))| (f, e)).collect();
+        // Return in a one-line field saves, as it does in a form
+        for (_, e) in &scalars {
+            e.set_activates_default(true);
+        }
         // One row per value, titled by its label, and an empty one to add.
         let mut multis: Vec<(Multi, Vec<ValueRow>)> = Vec::new();
         for (m, add_title) in [
@@ -1125,6 +1129,9 @@ impl Window {
                 .collect();
             rows.push((None, omui::entry_row(add_title, "")));
             group(&rows.iter().map(|(_, (r, _))| r).collect::<Vec<_>>());
+            for (_, (_, e)) in &rows {
+                e.set_activates_default(true);
+            }
             multis.push((m, rows.into_iter().map(|(shown, (_, e))| (shown, e)).collect()));
         }
         let notes = gtk::TextView::builder()
