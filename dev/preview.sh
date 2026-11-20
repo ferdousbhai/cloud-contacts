@@ -11,12 +11,14 @@ set -Eeuo pipefail
 # holds two cards for one person, so the offers to mirror and to merge duplicates show.
 #   list        the window as it opens: the contacts, the first one's card (in a narrow window: the list alone)
 #   typing      "Ann" typed as the window opens: the search has the keyboard and filters the list
+#   nobody      "Zelda" typed: a search that finds nobody
 #   card        Ann Lee found by her work number and opened (in a narrow window: her card in the list's place)
 #   back        the same, then Escape: in a narrow window, back to the list
 #   menu        the accounts menu open
 #   new         New Contact: nothing typed, Save disabled
 #   typed       New Contact with a first name typed: Save enabled
 #   edit        Edit Contact on Ann Lee
+#   problem     the same with a birthday that is not a date: why Save is off
 #   duplicates  the duplicates dialog
 #   review      Turn On… mirroring: what it would do, the doubtful pairs to call
 #   welcome     Google unlinked, then iCloud from the window: the page that links one (taken last: it unlinks them)
@@ -47,20 +49,23 @@ done
 for theme in "${themes[@]}"; do
   [[ -z $theme || -f $theme/colors.toml ]] || { echo "preview: $theme has no colors.toml" >&2; exit 1; }
 done
-read -r -a scenes <<< "${CLOUD_CONTACTS_PREVIEW_SCENES:-list typing card back menu new typed edit duplicates review welcome}"
+read -r -a scenes <<< "${CLOUD_CONTACTS_PREVIEW_SCENES:-list typing nobody card back menu new typed edit problem duplicates review welcome}"
 # `action:<name>[=<string>]` activates the window's action <name> over the scratch session bus, as its menus and
 # shortcuts do; `text:<words>` types them (an underscore is a space); the rest are keys, with modifiers named before
 # them held. The search keeps the keyboard after a search; New Contact opens with it on the account; the accounts
-# menu is two stops before the search (shift+Tab is ISO_Left_Tab); Unlink is Alt+U.
+# menu is two stops before the search (shift+Tab is ISO_Left_Tab); Edit Contact opens with it on the first name, five
+# stops before the birthday; Unlink is Alt+U.
 declare -A keys=(
   [list]=""
   [typing]="text:Ann"
+  [nobody]="text:Zelda"
   [card]="action:find text:0199 Return"
   [back]="action:find text:0199 Return Escape"
   [menu]="action:find shift+ISO_Left_Tab shift+ISO_Left_Tab space"
   [new]="action:new"
   [typed]="action:new Tab text:Ada"
   [edit]="action:find text:0199 Return action:edit"
+  [problem]="action:find text:0199 Return action:edit Tab Tab Tab Tab Tab text:soon"
   [duplicates]="action:duplicates"
   [review]="action:mirror-review"
   [welcome]="action:unlink=icloud alt+u"
