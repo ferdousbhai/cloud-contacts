@@ -41,6 +41,7 @@
 # Lee. Off again leaves them so.
 {"do":"set","role":"switch","name":"Mirror contacts between iCloud and Google","checked":true}
 {"do":"wait","dialog":"Mirror Contacts Between iCloud and Google"}
+{"do":"wait","toasts":["Looking at both accounts…"]}
 {"do":"click","role":"combo-box","name":"Ann Lee (iCloud) · Ann Lee (Google)"}
 {"do":"wait","focus":{"role":"list-item","name":"Decide Later"}}
 {"do":"key","keys":"Down"}

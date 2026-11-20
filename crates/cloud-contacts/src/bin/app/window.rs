@@ -67,8 +67,10 @@ pub struct Window {
     ks_list: gtk::ListBox,
     ks_row: omui::Row,
     ks_switch: gtk::Switch,
-    /// Set while the switch is moved by the window, not the person.
-    ks_quiet: Cell<bool>,
+    /// Where the window last put the switch: only a move away from it is the person's. A flag held up while the
+    /// window moves the switch was not enough: the move back to off that turning on makes, from inside the switch's
+    /// own handler, was taken for the person's, and turning on also turned off.
+    ks_shown: Cell<bool>,
     /// "N contacts look like duplicates", over the contacts, while any do.
     dup_offer: omui::Banner,
 }
@@ -225,7 +227,7 @@ impl Window {
         let weak = Rc::downgrade(self);
         self.ks_switch.connect_active_notify(move |switch| {
             let Some(this) = weak.upgrade() else { return };
-            if this.ks_quiet.get() {
+            if switch.is_active() == this.ks_shown.get() {
                 return;
             }
             if switch.is_active() {
@@ -233,6 +235,7 @@ impl Window {
                 this.set_switch(false);
                 this.mirror_review();
             } else {
+                this.ks_shown.set(false);
                 this.mirror_off();
             }
         });
@@ -779,9 +782,8 @@ impl Window {
 
     /// Moves the switch without taking it for the person's move.
     fn set_switch(&self, on: bool) {
-        self.ks_quiet.set(true);
+        self.ks_shown.set(on);
         self.ks_switch.set_active(on);
-        self.ks_quiet.set(false);
     }
 
     /// Shows mirroring's offer, switch and status line as the linked
@@ -1744,7 +1746,7 @@ fn build(app: &gtk::Application, banner: SignInBanner) -> Window {
         ks_list,
         ks_row,
         ks_switch,
-        ks_quiet: Cell::new(false),
+        ks_shown: Cell::new(false),
         dup_offer,
     }
 }
