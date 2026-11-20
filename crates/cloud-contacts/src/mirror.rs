@@ -63,6 +63,9 @@ pub struct Shared {
     pub emails: Vec<Labeled>,
     pub urls: Vec<Labeled>,
     pub addresses: Vec<Address>,
+    /// Shown by its company: a company's card. Not said by a state saved before this was kept.
+    #[serde(default)]
+    pub company_card: Option<bool>,
 }
 
 const SCALARS: [Field; 11] = [
@@ -99,6 +102,7 @@ impl Shared {
             emails: c.values(Multi::Email),
             urls: c.values(Multi::Url),
             addresses: c.addresses(),
+            company_card: Some(c.is_company()),
         }
     }
 
@@ -192,6 +196,9 @@ impl Shared {
         }
         if self.addresses != to.addresses {
             out.push(Change::Addresses(to.addresses.clone()));
+        }
+        if let Some(company) = to.company_card.filter(|_| self.company_card != to.company_card) {
+            out.push(Change::Company(company));
         }
         out
     }
@@ -322,6 +329,11 @@ pub fn merge(base: Option<&Shared>, i: &Shared, g: &Shared, later: Later) -> (Sh
         &g.addresses,
         same_address,
     );
+    // one of two values: where the sides differ, the one that is not the base's is the change. A base that does
+    // not say leaves iCloud's, the one account that kept it until now.
+    if i.company_card != g.company_card && base.is_some_and(|b| b.company_card == i.company_card) {
+        out.company_card = g.company_card;
+    }
     (out, warnings)
 }
 
@@ -713,7 +725,14 @@ impl<'a> Engine<'a> {
             let found = target
                 .values()
                 .filter(|c| !linked(c.id(), p.to))
-                .find(|c| Shared::of(c) == p.shared)
+                // but for being a company's card, which a copy noted before that was kept does not say
+                .find(|c| {
+                    let copy = Shared {
+                        company_card: p.shared.company_card,
+                        ..Shared::of(c)
+                    };
+                    copy == p.shared
+                })
                 .map(|c| c.id().to_string());
             if let Some(found) = found {
                 let (icloud, google) = match p.to {
@@ -1102,6 +1121,40 @@ mod tests {
 
     fn shared(v: Value) -> Shared {
         Shared::of(&Contact(v.as_object().unwrap().clone()))
+    }
+
+    #[test]
+    fn a_card_made_a_companys_on_one_side_is_one_on_both() {
+        let person = shared(json!({"firstName": "Bo", "companyName": "Acme"}));
+        let company = shared(json!({"firstName": "Bo", "companyName": "Acme", "isCompany": true}));
+        for later in [Later::ICloud, Later::Google, Later::Unknown] {
+            // changed on either side, it is the change; changed back, that is
+            let merged = |base, i, g| merge(Some(base), i, g, later).0.company_card;
+            assert_eq!(merged(&person, &company, &person), Some(true));
+            assert_eq!(merged(&person, &person, &company), Some(true));
+            assert_eq!(merged(&company, &person, &company), Some(false));
+            assert_eq!(merged(&company, &company, &person), Some(false));
+        }
+        assert_eq!(person.changes_to(&company), [Change::Company(true)]);
+        let mut card = Contact::new(false);
+        card.apply(&Shared::default().changes_to(&company)).unwrap();
+        assert!(card.is_company());
+        // a state saved before the flag was kept does not say: iCloud's stands, either way
+        let old: Shared = serde_json::from_value(json!({
+            "first": "Bo", "middle": "", "last": "", "prefix": "", "suffix": "", "nickname": "", "company": "Acme",
+            "job_title": "", "department": "", "birthday": "", "notes": "", "phones": [], "emails": [], "urls": [],
+            "addresses": []
+        }))
+        .unwrap();
+        assert_eq!(old.company_card, None);
+        assert_eq!(
+            merge(Some(&old), &company, &person, Later::Unknown).0.company_card,
+            Some(true)
+        );
+        assert_eq!(
+            merge(Some(&old), &person, &company, Later::Unknown).0.company_card,
+            Some(false)
+        );
     }
 
     #[test]

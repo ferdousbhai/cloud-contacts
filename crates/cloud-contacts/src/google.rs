@@ -701,15 +701,16 @@ pub fn card_of(p: &Value) -> Option<Contact> {
         c.insert("birthday".into(), json!(b));
     }
     // Google has no "show as a company" flag (a People API person is names, organizations and the rest): a contact
-    // with no name is the company it names, as Google's own Contacts shows it, and one with a name is a company
-    // where this app marked it so (`COMPANY_KEY`), as an iCloud company card with a person's name is.
+    // with no name is the company it names, as Google's own Contacts shows it, unless this app marked it
+    // (`COMPANY_KEY`): a company's card that names a person, as iCloud has them, or a card with no name that is not
+    // a company's.
     let named = ["firstName", "middleName", "lastName", "prefix", "suffix", "nickName"]
         .iter()
         .any(|k| c.contains_key(*k));
-    let marked = originals(p, "clientData").into_iter().any(marks_company);
+    let marked = originals(p, "clientData").into_iter().find_map(company_mark);
     c.insert(
         "isCompany".into(),
-        json!(c.contains_key("companyName") && (marked || !named)),
+        json!(c.contains_key("companyName") && marked.unwrap_or(!named)),
     );
     for (from, to, table) in [
         ("phoneNumbers", "phones", PHONE_TYPES),
@@ -774,9 +775,9 @@ fn address_field(a: &Value) -> Value {
 }
 
 /// The list `key` of Google's record of a card's contact.
-/// Whether an entry of a person's client data is this app's mark on a company.
-fn marks_company(entry: &Value) -> bool {
-    s(entry, "key") == COMPANY_KEY && s(entry, "value") == "true"
+/// What an entry of a person's client data says of the card being a company's, where it is this app's mark.
+fn company_mark(entry: &Value) -> Option<bool> {
+    (s(entry, "key") == COMPANY_KEY).then(|| s(entry, "value") == "true")
 }
 
 fn originals<'a>(orig: &'a Value, key: &str) -> Vec<&'a Value> {
@@ -870,11 +871,16 @@ pub fn person_of(card: &Contact) -> Value {
     // other apps' client data as it was, and this app's mark on a company
     let mut client: Vec<Value> = originals(&orig, "clientData")
         .into_iter()
-        .filter(|d| !marks_company(d))
+        .filter(|d| company_mark(d).is_none())
         .cloned()
         .collect();
-    if card.is_company() {
-        client.push(json!({ "key": COMPANY_KEY, "value": "true" }));
+    // marked where the name alone would say otherwise, and a company's card always
+    let named = ["firstName", "middleName", "lastName", "prefix", "suffix", "nickName"]
+        .iter()
+        .any(|k| !field(k).is_empty());
+    let unnamed_company = !named && !field("companyName").is_empty();
+    if card.is_company() || unnamed_company {
+        client.push(json!({ "key": COMPANY_KEY, "value": card.is_company().to_string() }));
     }
     if !client.is_empty() {
         p.insert("clientData".into(), json!(client));
@@ -1034,6 +1040,14 @@ mod tests {
         let mut person = Contact::new(false);
         person.apply(&[Change::Set(Field::First, "Bo".into())]).unwrap();
         assert!(person_of(&person).get("clientData").is_none());
+        // made a person's card again, with no name: marked so, or its company alone would read as a company's
+        let mut unnamed = Contact::new(true);
+        unnamed.apply(&[Change::Set(Field::Company, "Acme".into())]).unwrap();
+        unnamed.apply(&[Change::Company(false)]).unwrap();
+        let mut written = person_of(&unnamed);
+        assert_eq!(written["clientData"], json!([{"key": COMPANY_KEY, "value": "false"}]));
+        written["resourceName"] = json!("people/c10");
+        assert!(!card_of(&written).unwrap().is_company());
     }
 
     #[test]

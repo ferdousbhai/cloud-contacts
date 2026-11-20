@@ -146,6 +146,8 @@ pub enum Change {
     /// Make the street addresses these, in this order: an address the card
     /// already has (label and every part the same) keeps its entry whole.
     Addresses(Vec<Address>),
+    /// Show the card by its company (a company's card), or by its name.
+    Company(bool),
 }
 
 impl Change {
@@ -154,7 +156,7 @@ impl Change {
         match self {
             Change::Remove(m, v) => m.matches(&e.value, v),
             Change::RemoveExact(_, l, _) => e == l,
-            Change::Set(..) | Change::Add(..) | Change::Addresses(..) => false,
+            Change::Set(..) | Change::Add(..) | Change::Addresses(..) | Change::Company(_) => false,
         }
     }
 }
@@ -473,6 +475,7 @@ impl Contact {
                 }
                 Change::Add(..) | Change::Remove(..) | Change::RemoveExact(..) | Change::Addresses(..)
                     if self.has(c) => {}
+                Change::Company(is) => _ = self.0.insert("isCompany".into(), json!(is)),
                 Change::Addresses(list) => {
                     let old: Vec<Value> = self
                         .0
@@ -540,6 +543,7 @@ impl Contact {
                 .any(|e| m.matches(&e.value, &l.value) && e.label == l.label),
             Change::Remove(m, _) | Change::RemoveExact(m, ..) => !self.values(*m).iter().any(|e| change.removes(e)),
             Change::Addresses(list) => self.addresses() == *list,
+            Change::Company(is) => self.is_company() == *is,
         }
     }
 }
