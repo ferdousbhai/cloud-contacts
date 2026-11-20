@@ -53,11 +53,14 @@ pub const INSTALL_HINT: &str = "install Google's Workspace CLI: `npm install -g 
 /// The key in a card that holds Google's own record of the contact.
 pub const ORIGINAL: &str = "googlePerson";
 /// What is read of a contact.
-const PERSON_FIELDS: &str = "names,nicknames,emailAddresses,phoneNumbers,organizations,biographies,urls,addresses,birthdays,photos,metadata,memberships";
+const PERSON_FIELDS: &str = "names,nicknames,emailAddresses,phoneNumbers,organizations,biographies,urls,addresses,birthdays,photos,metadata,memberships,clientData";
 /// What a write sets: every field this app shows. One left out of the
 /// person written is removed.
 const UPDATE_FIELDS: &str =
-    "names,nicknames,emailAddresses,phoneNumbers,organizations,biographies,urls,addresses,birthdays";
+    "names,nicknames,emailAddresses,phoneNumbers,organizations,biographies,urls,addresses,birthdays,clientData";
+/// The key of the client data that says a contact is shown by its company: Google keeps such data for the apps that
+/// write it, and shows it nowhere.
+const COMPANY_KEY: &str = "cloud-contacts.isCompany";
 
 const TIMEOUT: Duration = Duration::from_secs(90);
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(600);
@@ -698,11 +701,16 @@ pub fn card_of(p: &Value) -> Option<Contact> {
         c.insert("birthday".into(), json!(b));
     }
     // Google has no "show as a company" flag (a People API person is names, organizations and the rest): a contact
-    // with no name is the company it names, as Google's own Contacts shows it.
+    // with no name is the company it names, as Google's own Contacts shows it, and one with a name is a company
+    // where this app marked it so (`COMPANY_KEY`), as an iCloud company card with a person's name is.
     let named = ["firstName", "middleName", "lastName", "prefix", "suffix", "nickName"]
         .iter()
         .any(|k| c.contains_key(*k));
-    c.insert("isCompany".into(), json!(!named && c.contains_key("companyName")));
+    let marked = originals(p, "clientData").into_iter().any(marks_company);
+    c.insert(
+        "isCompany".into(),
+        json!(c.contains_key("companyName") && (marked || !named)),
+    );
     for (from, to, table) in [
         ("phoneNumbers", "phones", PHONE_TYPES),
         ("emailAddresses", "emailAddresses", EMAIL_TYPES),
@@ -766,6 +774,11 @@ fn address_field(a: &Value) -> Value {
 }
 
 /// The list `key` of Google's record of a card's contact.
+/// Whether an entry of a person's client data is this app's mark on a company.
+fn marks_company(entry: &Value) -> bool {
+    s(entry, "key") == COMPANY_KEY && s(entry, "value") == "true"
+}
+
 fn originals<'a>(orig: &'a Value, key: &str) -> Vec<&'a Value> {
     orig[key].as_array().map(|a| a.iter().collect()).unwrap_or_default()
 }
@@ -853,6 +866,18 @@ pub fn person_of(card: &Contact) -> Value {
     }
     if !orgs.is_empty() {
         p.insert("organizations".into(), json!(orgs));
+    }
+    // other apps' client data as it was, and this app's mark on a company
+    let mut client: Vec<Value> = originals(&orig, "clientData")
+        .into_iter()
+        .filter(|d| !marks_company(d))
+        .cloned()
+        .collect();
+    if card.is_company() {
+        client.push(json!({ "key": COMPANY_KEY, "value": "true" }));
+    }
+    if !client.is_empty() {
+        p.insert("clientData".into(), json!(client));
     }
     let notes = card.get("notes");
     if !notes.trim().is_empty() {
@@ -980,6 +1005,35 @@ mod tests {
         assert!(!c.has_photo(), "Google's default picture is no photo");
         assert!(!c.is_company(), "a person at a company");
         assert!(card_of(&json!({})).is_none());
+    }
+
+    #[test]
+    fn a_company_with_a_persons_name_stays_one_through_google() {
+        let mut card = Contact::new(true);
+        card.apply(&[
+            Change::Set(Field::First, "Bo".into()),
+            Change::Set(Field::Company, "Acme".into()),
+        ])
+        .unwrap();
+        let mut written = person_of(&card);
+        assert_eq!(written["clientData"], json!([{"key": COMPANY_KEY, "value": "true"}]));
+        written["resourceName"] = json!("people/c9");
+        // another app's data beside it comes back as it was
+        written["clientData"]
+            .as_array_mut()
+            .unwrap()
+            .insert(0, json!({"key": "other", "value": "1"}));
+        let read = card_of(&written).unwrap();
+        assert!(read.is_company());
+        assert_eq!(read.display_name(), "Acme");
+        assert_eq!(
+            person_of(&read)["clientData"],
+            json!([{"key": "other", "value": "1"}, {"key": COMPANY_KEY, "value": "true"}])
+        );
+        // a person writes no mark
+        let mut person = Contact::new(false);
+        person.apply(&[Change::Set(Field::First, "Bo".into())]).unwrap();
+        assert!(person_of(&person).get("clientData").is_none());
     }
 
     #[test]

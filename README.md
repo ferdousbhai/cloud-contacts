@@ -66,7 +66,8 @@ cloud-contacts mirror off      # both accounts keep their contacts as they are
   or two (`mirror pair` / `mirror apart`, or in the window); neither is copied until you
   decide. Everything else is copied to the other account.
 - **What crosses**: names, nickname, company, job title, department, birthday, notes, phones,
-  emails, URLs and addresses. **What never crosses**: photos, Google's labels and groups, and the
+  emails, URLs and addresses, and whether a card is a company's (Google has no such setting, so
+  Cloud Contacts keeps a mark of its own on the Google contact, which Google shows nowhere). **What never crosses**: photos, Google's labels and groups, and the
   fields only iCloud has (social profiles, related names and the like); each account keeps its
   own, and nothing of them is removed.
 - **Changed on both sides**: phones, emails, URLs and addresses are joined, without duplicates; a
