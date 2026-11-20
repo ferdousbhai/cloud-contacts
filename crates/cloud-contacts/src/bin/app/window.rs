@@ -37,6 +37,8 @@ pub struct Window {
     banner: SignInBanner,
     search: gtk::SearchEntry,
     list: gtk::ListBox,
+    /// What the sidebar shows in place of the contacts when it has none to show.
+    list_empty: omui::EmptyState,
     card: gtk::Box,
     card_stack: gtk::Stack,
     split: omui::Split,
@@ -1271,7 +1273,10 @@ impl Window {
         let shown = self.shown.borrow();
         let selected = self.selected.borrow().clone();
         let several = self.accounts.borrow().len() > 1;
-        self.list.remove_all();
+        // The rows one by one: `remove_all` takes the list's placeholder with them.
+        while let Some(row) = self.list.row_at_index(0) {
+            self.list.remove(&row);
+        }
         for e in &shown.entries {
             let row = contact_row(e, several);
             self.list.append(&row);
@@ -1301,6 +1306,12 @@ impl Window {
                 .collect()
         });
         self.list.invalidate_filter();
+        // A search that finds nobody is not an account without contacts.
+        self.list_empty.set_title(if query.trim().is_empty() {
+            "No Contacts"
+        } else {
+            "No Results"
+        });
         let shown = self.list.selected_row().is_some_and(|r| r.is_child_visible());
         if !shown && !self.split.is_collapsed() {
             let first = self.first_visible();
@@ -1532,11 +1543,8 @@ fn build(app: &gtk::Application, banner: SignInBanner) -> Window {
         .selection_mode(gtk::SelectionMode::Single)
         .activate_on_single_click(true)
         .build();
-    list.set_placeholder(Some(
-        &omui::EmptyState::new(Some(name::USER), "No Contacts", None)
-            .compact()
-            .widget,
-    ));
+    let list_empty = omui::EmptyState::new(Some(name::USER), "No Contacts", None).compact();
+    list.set_placeholder(Some(&list_empty.widget));
     let sidebar_header = omui::header(Some(omui::Title::new("Contacts", "").widget.upcast_ref()));
     // Refresh (Ctrl+R) and Duplicates in one menu: with three buttons the
     // sidebar still has room to say "Contacts"
@@ -1710,6 +1718,7 @@ fn build(app: &gtk::Application, banner: SignInBanner) -> Window {
         banner,
         search,
         list,
+        list_empty,
         card,
         card_stack,
         split,

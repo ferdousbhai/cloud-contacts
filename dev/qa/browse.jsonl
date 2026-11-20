@@ -31,14 +31,17 @@
 {"do":"wait","role":"label","name":"+47 555 01 234","visible":true}
 {"do":"shot","path":"browse-list.png"}
 
-# A search that matches nothing: no contact, and nothing to edit.
+# A search that matches nothing says so where the contacts were: no contact, and nothing to edit.
 {"do":"type","role":"search-box","name":"Search (Ctrl+F)","text":"Zelda"}
 {"do":"wait","role":"list-item","name":"Bob Berg, iCloud","visible":false}
+{"do":"wait","role":"label","name":"No Results","visible":true}
 {"do":"wait","role":"label","name":"No Contact Selected","visible":true}
 {"do":"wait","role":"button","name":"Edit (Ctrl+E)","sensitive":false}
+{"do":"shot","path":"browse-no-results.png"}
 {"do":"key","keys":"<Control>a"}
 {"do":"key","keys":"BackSpace"}
 {"do":"wait","role":"list-item","name":"Bob Berg, iCloud","visible":true}
+{"do":"wait","role":"label","name":"No Results","visible":false}
 
 # The account filter's drop-down, by the keyboard: Down and Enter show Google's contacts alone, Up and Enter every
 # account again.
