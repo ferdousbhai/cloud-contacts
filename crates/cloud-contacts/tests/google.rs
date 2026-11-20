@@ -386,6 +386,13 @@ fn mirror_on_copies_both_ways_and_holds_doubts() {
         .filter_map(|p| p["names"][0]["givenName"].as_str())
         .collect();
     assert!(firsts.contains(&"Bob") && firsts.contains(&"Mock"), "{firsts:?}");
+    // Acme Hardware is a company in iCloud. Google has no such flag: its copy, with no name, is one too, not a
+    // person named after the company they work at.
+    let acme = env.json(&["list", "Acme Hardware", "--account", "google", "--cached"]);
+    assert_eq!(
+        (&acme[0]["name"], &acme[0]["is_company"]),
+        (&json!("Acme Hardware"), &json!(true))
+    );
     let gus: Vec<_> = env
         .icloud
         .requests()

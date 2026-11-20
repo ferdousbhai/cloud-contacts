@@ -232,6 +232,21 @@ fn copies_both_ways_and_edits_cross() {
 }
 
 #[test]
+fn a_company_is_copied_as_a_company() {
+    let w = World::new();
+    w.google
+        .add(&[Change::Set(Field::Company, "Acme Hardware".into())], true)
+        .unwrap();
+    w.google.add_direct(&person("Gus"));
+    w.on();
+    assert_eq!(w.run().unwrap().copied_to_icloud, 2);
+    let copies = w.icloud.all();
+    let company = |c: &&Contact| c.field(Field::Company) == "Acme Hardware";
+    assert!(copies.iter().find(company).unwrap().is_company());
+    assert!(!copies.iter().find(|c| !company(c)).unwrap().is_company());
+}
+
+#[test]
 fn what_one_side_alone_keeps_is_never_written_to_the_other() {
     let w = World::new();
     let id = w.icloud.add_direct(&person("Ann"));

@@ -828,7 +828,11 @@ impl<'a> Engine<'a> {
                     shared: shared.clone(),
                 });
                 save(self.root, &s)?;
-                let saved = self.side(to_side).add(&Shared::default().changes_to(&shared), false)?;
+                // Shown by its company in the copy too (iCloud keeps that as a flag; Google has none, and reads a
+                // contact with no name as one).
+                let saved = self
+                    .side(to_side)
+                    .add(&Shared::default().changes_to(&shared), c.is_company())?;
                 self.wrote()?;
                 let new = saved.value.id().to_string();
                 let (icloud, google) = match to_side {

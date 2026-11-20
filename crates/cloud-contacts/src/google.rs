@@ -697,7 +697,12 @@ pub fn card_of(p: &Value) -> Option<Contact> {
     if let Some(b) = primary(&p["birthdays"]).and_then(|b| birthday_card(&b["date"])) {
         c.insert("birthday".into(), json!(b));
     }
-    c.insert("isCompany".into(), json!(false));
+    // Google has no "show as a company" flag (a People API person is names, organizations and the rest): a contact
+    // with no name is the company it names, as Google's own Contacts shows it.
+    let named = ["firstName", "middleName", "lastName", "prefix", "suffix", "nickName"]
+        .iter()
+        .any(|k| c.contains_key(*k));
+    c.insert("isCompany".into(), json!(!named && c.contains_key("companyName")));
     for (from, to, table) in [
         ("phoneNumbers", "phones", PHONE_TYPES),
         ("emailAddresses", "emailAddresses", EMAIL_TYPES),
@@ -973,7 +978,26 @@ mod tests {
         assert_eq!(c.values(Multi::Email)[0].label, "WORK");
         assert_eq!(c.addresses()[0].state, "IL");
         assert!(!c.has_photo(), "Google's default picture is no photo");
+        assert!(!c.is_company(), "a person at a company");
         assert!(card_of(&json!({})).is_none());
+    }
+
+    #[test]
+    fn a_company_with_no_name_reads_as_a_company() {
+        let company = json!({"resourceName": "people/c2", "organizations": [{"name": "Acme Hardware"}]});
+        let c = card_of(&company).unwrap();
+        assert!(c.is_company());
+        assert_eq!(c.display_name(), "Acme Hardware");
+        assert_eq!(c.work(" · "), "", "the company is the name, not a line under it");
+        // a nickname is what such a contact is shown by, with its company under it
+        let mut nicknamed = company.clone();
+        nicknamed["nicknames"] = json!([{"value": "The Shop"}]);
+        let c = card_of(&nicknamed).unwrap();
+        assert!(!c.is_company());
+        assert_eq!(
+            (c.display_name().as_str(), c.work(" · ").as_str()),
+            ("The Shop", "Acme Hardware")
+        );
     }
 
     #[test]
