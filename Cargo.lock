@@ -880,7 +880,7 @@ checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
 [[package]]
 name = "icloud-app"
 version = "0.13.0"
-source = "git+https://github.com/ferdousbhai/icloud-for-omarchy?rev=7763ac068dd3c6028dc6e26b27ef3ac33a580fab#7763ac068dd3c6028dc6e26b27ef3ac33a580fab"
+source = "git+https://github.com/ferdousbhai/icloud-for-omarchy?rev=a5d0f153eefebbd4be4694e83a3962c6074f2023#a5d0f153eefebbd4be4694e83a3962c6074f2023"
 dependencies = [
  "icloud-session",
  "rustix",
@@ -893,7 +893,7 @@ dependencies = [
 [[package]]
 name = "icloud-app-ui"
 version = "0.13.0"
-source = "git+https://github.com/ferdousbhai/icloud-for-omarchy?rev=7763ac068dd3c6028dc6e26b27ef3ac33a580fab#7763ac068dd3c6028dc6e26b27ef3ac33a580fab"
+source = "git+https://github.com/ferdousbhai/icloud-for-omarchy?rev=a5d0f153eefebbd4be4694e83a3962c6074f2023#a5d0f153eefebbd4be4694e83a3962c6074f2023"
 dependencies = [
  "async-channel",
  "gtk4",
@@ -904,7 +904,7 @@ dependencies = [
 [[package]]
 name = "icloud-session"
 version = "0.13.0"
-source = "git+https://github.com/ferdousbhai/icloud-for-omarchy?rev=7763ac068dd3c6028dc6e26b27ef3ac33a580fab#7763ac068dd3c6028dc6e26b27ef3ac33a580fab"
+source = "git+https://github.com/ferdousbhai/icloud-for-omarchy?rev=a5d0f153eefebbd4be4694e83a3962c6074f2023#a5d0f153eefebbd4be4694e83a3962c6074f2023"
 dependencies = [
  "clap",
  "futures-lite",
@@ -1104,8 +1104,8 @@ dependencies = [
 
 [[package]]
 name = "omui"
-version = "0.5.1"
-source = "git+https://github.com/ferdousbhai/omui?rev=84fda37d4df6c0f0f47e8296c4a1357930fceab1#84fda37d4df6c0f0f47e8296c4a1357930fceab1"
+version = "0.5.3"
+source = "git+https://github.com/ferdousbhai/omui?rev=ad8058e157b028074bb4c492723cd0316b283968#ad8058e157b028074bb4c492723cd0316b283968"
 dependencies = [
  "glib-build-tools",
  "gtk4",
