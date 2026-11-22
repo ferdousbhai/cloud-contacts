@@ -4,6 +4,8 @@ Your iCloud and Google contacts side by side on [Omarchy](https://omarchy.org) (
 Linux): a GTK 4 window themed by Omarchy and a command line for scripts and AI agents. Search, call,
 email, add, edit, delete and export as vCard, in either account.
 
+![The Contacts window: both accounts' contacts in a list, and one contact's card](docs/screenshots/contacts.png)
+
 Each contact lives in one account, and a change goes to that account alone: the window shows
 both accounts together, labelled, with a filter for one. If you want, Cloud Contacts can also mirror
 your contacts between iCloud and Google ([below](#mirroring-icloud-and-google)).
@@ -20,6 +22,16 @@ It trusts the package-signing key, adds the `[cloud-contacts]` pacman repository
 package; updates then arrive with `omarchy update`. The package replaces `icloud-contacts`, iCloud
 for Omarchy's Contacts app: your iCloud contacts appear here on the first run, through the same
 iCloud sign-in.
+
+Open it from the app launcher (Contacts) or with `cloud-contacts open`. The window follows Omarchy's theme and
+language (English for now).
+
+After 0.4.4 the app has one name, `cloud-contacts`: the desktop entry is `cloud-contacts.desktop`, the icon
+`cloud-contacts`, and the window's class in Hyprland `cloud-contacts` (it was `com.ferdousbhai.cloudcontacts`, so a
+window rule of yours that matched that class needs the new one). The window's binary moved off `PATH` to
+`/usr/lib/cloud-contacts/`; `cloud-contacts-app` stays on `PATH` as a launcher that runs `cloud-contacts open`, so a
+keybinding that ran it still works. The command
+line's exit codes are 0 and 1 alone; a script that told failures apart by the code reads the JSON error's `code`.
 
 ## Accounts
 
@@ -42,9 +54,32 @@ an account forgets it on this computer; its contacts stay in the account.
 - **Copy, call, email**: a click copies a phone number or address; emails and links open.
 - **Add**: the new contact goes to the account you pick (the one the filter shows, to start).
 - **Edit**: names, company, phones, emails, URLs, birthday and notes. What the window does not
-  show (photos, social profiles, Google's labels and groups) stays as the account has it.
+  show (photos, social profiles, Google's labels and groups) stays as the account has it. Cancel,
+  Escape or closing the window asks before it discards what you typed, and only Discard loses it.
 - **Delete**: from the account it is in, on every device. iCloud keeps no Recently Deleted for
   contacts; Google keeps them in its Trash for 30 days.
+
+## Keyboard
+
+| Key | Does |
+|---|---|
+| Ctrl+N | New contact |
+| Ctrl+E | Edit the chosen contact |
+| Ctrl+F | Search: type a name, a company, a number or an address |
+| Enter, in the search | Opens the first match |
+| Up, Down | The contact above or below in the list |
+| Ctrl+R, F5 | Fetch every account now |
+| Escape, Alt+Left | In a narrow window, back from a contact to the list |
+| F1, Ctrl+? | Show or hide every shortcut in the window |
+| Ctrl+W, Ctrl+Q | Close the window |
+| Enter, in a dialog | Save, or the dialog's default answer (never the one that deletes or discards) |
+| Escape, in a dialog | Cancel; with something typed, it asks before discarding it |
+| Alt and a button's underlined letter | That button: Alt+S saves, Alt+C cancels |
+| Ctrl+Z, Ctrl+Shift+Z | Undo and redo what you typed in a field |
+
+A deleted contact cannot be brought back from here, which is why Delete asks first: the accounts
+offer no way to restore one whole (its photo, its groups and its ID), and iCloud keeps no trash.
+Google keeps it in its own Trash for 30 days.
 
 ## Mirroring iCloud and Google
 
@@ -125,9 +160,10 @@ cloud-contacts refresh                 # fetch every account now
 
 Text on a terminal, a JSON envelope when piped (`--json`, `--quiet`, `--ids-only`, `--count`).
 An account that fails while the others answer is a warning (`meta.warnings`), not an error.
-Exit codes: 2 usage or ambiguous, 3 not signed in or nothing linked, 4 not found, 5 an account
-out of reach. `cloud-contacts --help` has the rest. For coding agents, `cloud-contacts skill
-install` installs the agent skill.
+A command exits 0 when it did what it was asked and 1 when it did not, with the error on stderr
+(the JSON error object when piped or with `--json`, whose `code` says what went wrong) and nothing
+on stdout. `cloud-contacts open` opens the window. `cloud-contacts --help` has the rest. For coding
+agents, `cloud-contacts skill install` installs the agent skill.
 
 ## From source
 

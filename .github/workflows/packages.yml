@@ -1,5 +1,5 @@
 name: Native packages
-# Builds the release packages for a version tag; changes are checked locally by bin/check.
+# Builds the release packages for a version tag; every push is checked by check.yml, which runs bin/check.
 on:
   push:
     tags: ['v*']

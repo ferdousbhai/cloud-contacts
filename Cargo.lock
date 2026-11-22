@@ -632,6 +632,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "gdk4-wayland"
+version = "0.11.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "99cc5266dc4e8745a4c4683b26a0c54977a452809d572c940e39c6844663c0ec"
+dependencies = [
+ "gdk4",
+ "gdk4-wayland-sys",
+ "gio",
+ "glib",
+ "libc",
+]
+
+[[package]]
+name = "gdk4-wayland-sys"
+version = "0.11.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bb55bc5225519d34fdf1412db3755af88d1388a1c2a053d92e6751db13d96e68"
+dependencies = [
+ "glib-sys",
+ "libc",
+ "system-deps",
+]
+
+[[package]]
 name = "getrandom"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -880,7 +904,7 @@ checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
 [[package]]
 name = "icloud-app"
 version = "0.13.0"
-source = "git+https://github.com/ferdousbhai/icloud-for-omarchy?rev=557d1c1e1a64ef38c8be952c4e59f3871427783d#557d1c1e1a64ef38c8be952c4e59f3871427783d"
+source = "git+https://github.com/ferdousbhai/icloud-for-omarchy?rev=866e9ed05818fc94e9cd413ede96249e99e68772#866e9ed05818fc94e9cd413ede96249e99e68772"
 dependencies = [
  "icloud-session",
  "rustix",
@@ -893,7 +917,7 @@ dependencies = [
 [[package]]
 name = "icloud-app-ui"
 version = "0.13.0"
-source = "git+https://github.com/ferdousbhai/icloud-for-omarchy?rev=557d1c1e1a64ef38c8be952c4e59f3871427783d#557d1c1e1a64ef38c8be952c4e59f3871427783d"
+source = "git+https://github.com/ferdousbhai/icloud-for-omarchy?rev=866e9ed05818fc94e9cd413ede96249e99e68772#866e9ed05818fc94e9cd413ede96249e99e68772"
 dependencies = [
  "async-channel",
  "gtk4",
@@ -904,7 +928,7 @@ dependencies = [
 [[package]]
 name = "icloud-session"
 version = "0.13.0"
-source = "git+https://github.com/ferdousbhai/icloud-for-omarchy?rev=557d1c1e1a64ef38c8be952c4e59f3871427783d#557d1c1e1a64ef38c8be952c4e59f3871427783d"
+source = "git+https://github.com/ferdousbhai/icloud-for-omarchy?rev=866e9ed05818fc94e9cd413ede96249e99e68772#866e9ed05818fc94e9cd413ede96249e99e68772"
 dependencies = [
  "clap",
  "futures-lite",
@@ -1104,9 +1128,10 @@ dependencies = [
 
 [[package]]
 name = "omui"
-version = "0.5.7"
-source = "git+https://github.com/ferdousbhai/omui?rev=d5796183fdcc1dab218c7af5343bc0f29389db0e#d5796183fdcc1dab218c7af5343bc0f29389db0e"
+version = "0.6.0"
+source = "git+https://github.com/ferdousbhai/omui?rev=40737b7a74567654fc3fa7ac8c1037b42255afd4#40737b7a74567654fc3fa7ac8c1037b42255afd4"
 dependencies = [
+ "gdk4-wayland",
  "glib-build-tools",
  "gtk4",
  "serde_json",

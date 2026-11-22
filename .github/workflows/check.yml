@@ -1,0 +1,45 @@
+name: Check
+# Every push runs what bin/check runs on a developer's machine: rustfmt, clippy, the library's and the command
+# line's tests, the window driven through dev/qa on a broadway display (any GLib warning fails it), and the
+# installer's tests. Native packages builds the release packages for a version tag.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    # Arch, as the app's users run: its GTK 4 is the one the window is written against, and it ships
+    # gtk4-broadwayd, the display the window QA draws on.
+    container: archlinux:latest
+    steps:
+      # Before the checkout, which clones only when it finds git. The image has no fonts at all, and GTK warns
+      # when it has none to draw text with: the window's own font is installed. python is the tests' stand-in for
+      # gws and runs the installer's checks.
+      - name: Install what the checks need
+        run: |
+          pacman -Syu --noconfirm --needed base-devel rust git gtk4 python diffutils ttf-jetbrains-mono
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: |
+            /home/builder/.cargo/registry
+            /home/builder/.cargo/git
+            target
+          key: check-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            check-
+      # As a regular user: root writes where permissions forbid it, which the test of an export into a
+      # directory it cannot write would pass over, and bin/check fails rather than skip it.
+      - name: bin/check
+        run: |
+          useradd -m builder
+          mkdir -p /home/builder/.cargo target
+          chown -R builder:builder . /home/builder
+          runuser -u builder -- env HOME=/home/builder bin/check

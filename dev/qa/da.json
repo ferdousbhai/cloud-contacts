@@ -1,0 +1,24 @@
+{
+  "Contacts": "Kontakter",
+  "Search (Ctrl+F)": "Søg (Ctrl+F)",
+  "New Contact (Ctrl+N)": "Ny kontakt (Ctrl+N)",
+  "Edit (Ctrl+E)": "Rediger (Ctrl+E)",
+  "Refresh": "Opdater",
+  "No Results": "Ingen resultater",
+  "No Contact Selected": "Ingen kontakt valgt",
+  "Not Now": "Ikke nu",
+  "Mirror contacts between iCloud and Google": "Spejl kontakter mellem iCloud og Google",
+  "{n} contacts look like duplicates of each other.": {
+    "one": "{n} kontakt ligner en dublet.",
+    "other": "{n} kontakter ligner dubletter af hinanden."
+  },
+  "In {}": "I {}",
+  "mobile": "mobil",
+  "Keyboard shortcuts": "Tastaturgenveje",
+  "Edit the chosen contact": "Rediger den valgte kontakt",
+  "Edit Contact": "Rediger kontakt",
+  "_Cancel": "_Annuller",
+  "Discard your changes?": "Kassér dine ændringer?",
+  "_Discard": "_Kassér",
+  "birthday \"{}\": use YYYY-MM-DD, or MM-DD without a year": "fødselsdag \"{}\": skriv ÅÅÅÅ-MM-DD, eller MM-DD uden år"
+}

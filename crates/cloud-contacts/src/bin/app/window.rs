@@ -14,14 +14,14 @@ use std::sync::Arc;
 
 use gtk::prelude::*;
 use gtk::{gio, glib};
-use omui::background;
 use omui::icons::name;
+use omui::{background, i18n, tr, trn};
 
 use cloud_contacts::accounts;
 use cloud_contacts::book::{Book, Entry, Shown};
 use cloud_contacts::config;
 use cloud_contacts::dedupe;
-use cloud_contacts::draft::{Draft, Row, SCALARS, typed};
+use cloud_contacts::draft::{Draft, Problem, Row, SCALARS, typed};
 use cloud_contacts::error::Error;
 use cloud_contacts::icloud::api::SessionTransport;
 use cloud_contacts::mirror;
@@ -47,7 +47,8 @@ pub struct Window {
     /// Which account the sidebar shows: "All Accounts", then each by name.
     filter: gtk::DropDown,
     filter_names: gtk::StringList,
-    accounts_menu: gio::Menu,
+    /// The accounts menu's button, given a new menu for each change of the accounts.
+    accounts_button: gtk::MenuButton,
     stack: gtk::Stack,
     transport: Arc<SessionTransport>,
     root: Option<PathBuf>,
@@ -73,14 +74,33 @@ pub struct Window {
     ks_shown: Cell<bool>,
     /// "N contacts look like duplicates", over the contacts, while any do.
     dup_offer: omui::Banner,
+    /// While the add or edit dialog holds what was typed: whether that differs from the contact as it was loaded.
+    /// Closing the window asks before it loses such work.
+    editing: RefCell<Option<Rc<dyn Fn() -> bool>>>,
+    /// Whether the question to discard what was typed is on screen: it is asked once, not again over itself.
+    asking: Cell<bool>,
+    /// The sidebar's menu, written again in a new language.
+    main_menu: gio::Menu,
+    /// What the card pane shows with no contact chosen.
+    no_card: omui::EmptyState,
+    /// The overlay listing every shortcut, on F1 and Ctrl+?.
+    shortcuts: omui::ShortcutOverlay,
+    /// The sidebar's title, the mirroring switch's title, and the mirror line under it as last shown, kept as what it
+    /// says so that a switch of language writes it again.
+    mirror_line: RefCell<Option<mirror::Line>>,
+    /// How many contacts look like duplicates, for the banner's line.
+    duplicates: Cell<usize>,
 }
 
 impl Window {
     pub fn new(app: &gtk::Application) -> Rc<Self> {
         let this = Rc::new_cyclic(|weak: &Weak<Window>| {
             let (w1, w2) = (weak.clone(), weak.clone());
+            // The banner keeps its text from here on (icloud-app-ui takes it once): it is in the language the window
+            // opened in.
+            let ask: &'static str = Box::leak(tr("Sign in to iCloud to see your iCloud contacts").into_boxed_str());
             let banner = SignInBanner::new(
-                "Sign in to iCloud to see your iCloud contacts",
+                ask,
                 move || {
                     if let Some(this) = w1.upgrade() {
                         this.sync();
@@ -95,11 +115,37 @@ impl Window {
             build(app, banner)
         });
         let keep_alive = RefCell::new(Some(this.clone()));
+        let weak = Rc::downgrade(&this);
         this.window.connect_close_request(move |_| {
+            // The compositor can close the window over an open dialog, which the window's own keys cannot: what
+            // was typed there is asked about first, and the window stays unless the answer is to discard it.
+            if let Some(this) = weak.upgrade() {
+                if this.asking.get() {
+                    return glib::Propagation::Stop;
+                }
+                let unsaved = this.editing.borrow().clone();
+                if unsaved.is_some_and(|unsaved| unsaved()) {
+                    this.ask_discard(
+                        |_| {},
+                        |this| {
+                            this.editing.take();
+                            this.window.close();
+                        },
+                    );
+                    return glib::Propagation::Stop;
+                }
+            }
             keep_alive.borrow_mut().take();
             glib::Propagation::Proceed
         });
         this.connect();
+        this.install_keys();
+        let weak = Rc::downgrade(&this);
+        i18n::on_change(&this.window, move || {
+            if let Some(this) = weak.upgrade() {
+                this.retranslate();
+            }
+        });
         this.load_cached();
         this.sync();
         let weak = Rc::downgrade(&this);
@@ -192,14 +238,14 @@ impl Window {
             *this.last_error.borrow_mut() = None;
             this.sync();
         });
-        action("new", |this| this.edit_draft(None, None));
+        action("new", |this| this.edit_draft(None, None, None));
         action("find", |this| {
             this.split.set_show_content(false);
             this.search.grab_focus();
         });
         action("edit", |this| {
             if let Some(c) = this.chosen() {
-                this.edit_draft(Some(c), None);
+                this.edit_draft(Some(c), None, None);
             }
         });
         action("delete", |this| {
@@ -259,6 +305,33 @@ impl Window {
         self.window.add_action(&a);
     }
 
+    /// The window's own keys: the shortcut overlay, and Ctrl+Q and Ctrl+W, which close the window as its close
+    /// button does, so typed work is asked about first. The search has the keyboard most of the time, where `?` is a
+    /// character, so the overlay is on F1 and Ctrl+?.
+    fn install_keys(self: &Rc<Self>) {
+        self.shortcuts.install(&self.window, true);
+        omui::quit_keys(&self.window);
+    }
+
+    /// After a switch of language: what the window wrote from its state is written again. The widgets that hold one
+    /// fixed string follow by themselves ([`i18n::bind_label`] and its kin); dialogs and toasts are made in the
+    /// language of the moment.
+    fn retranslate(self: &Rc<Self>) {
+        let accounts = self.accounts.borrow().clone();
+        self.show_accounts(&accounts);
+        main_menu_items(&self.main_menu);
+        self.no_card.set_title(&tr("No Contact Selected"));
+        self.ks_offer
+            .set_title(&tr("Your iCloud and Google contacts are separate. Mirror them?"));
+        self.ks_row.set_title(&tr("Mirror contacts between iCloud and Google"));
+        let line = self.mirror_line.borrow().clone();
+        self.ks_row
+            .set_subtitle(&line.map_or_else(|| tr("Off"), |line| mirror_text(&line)));
+        self.show_duplicate_title();
+        // The rows and the card, and the list's empty state with them.
+        self.show_list();
+    }
+
     fn chosen(&self) -> Option<Entry> {
         self.shown.borrow().get(&self.selected.borrow()).cloned()
     }
@@ -293,8 +366,14 @@ impl Window {
         if *self.accounts.borrow() == accounts {
             return;
         }
+        self.show_accounts(&accounts);
+        *self.accounts.borrow_mut() = accounts;
+    }
+
+    /// Writes the account filter and the accounts menu for `accounts`, in the language of the moment.
+    fn show_accounts(self: &Rc<Self>, accounts: &[(String, String)]) {
         let selected = self.filter_account();
-        let mut names = vec!["All Accounts".to_string()];
+        let mut names = vec![tr("All Accounts")];
         names.extend(accounts.iter().map(|(n, p)| account_title(n, p)));
         let refs: Vec<&str> = names.iter().map(String::as_str).collect();
         self.filter_names.splice(0, self.filter_names.n_items(), &refs);
@@ -303,13 +382,16 @@ impl Window {
             .map_or(0, |i| i + 1);
         self.filter.set_selected(at as u32);
         self.filter.set_visible(accounts.len() > 1);
-        self.accounts_menu.remove_all();
+        // A new menu each time: GTK's popover names a submenu's page by its label, and a model changed in place adds
+        // the pages again beside the old ones (a warning, and a menu that shows the first), as a switch of language
+        // or a second linked account would.
+        let menu = gio::Menu::new();
         let linked = gio::Menu::new();
-        for (name, provider) in &accounts {
+        for (name, provider) in accounts {
             let one = gio::Menu::new();
             if provider == "google" {
                 one.append(
-                    Some("Sign In Again"),
+                    Some(&tr("Sign In Again")),
                     Some(&gio::Action::print_detailed_name(
                         "win.relogin",
                         Some(&name.to_variant()),
@@ -317,7 +399,7 @@ impl Window {
                 );
             }
             one.append(
-                Some("Unlink…"),
+                Some(&tr("Unlink…")),
                 Some(&gio::Action::print_detailed_name(
                     "win.unlink",
                     Some(&name.to_variant()),
@@ -325,16 +407,16 @@ impl Window {
             );
             linked.append_submenu(Some(&account_title(name, provider)), &one);
         }
-        self.accounts_menu.append_section(None, &linked);
+        menu.append_section(None, &linked);
         let add = gio::Menu::new();
         if !accounts.iter().any(|(_, p)| p == "icloud") {
-            add.append(Some("Add iCloud Account…"), Some("win.add-icloud"));
+            add.append(Some(&tr("Add iCloud Account…")), Some("win.add-icloud"));
         }
-        add.append(Some("Add Google Account…"), Some("win.add-google"));
-        self.accounts_menu.append_section(None, &add);
+        add.append(Some(&tr("Add Google Account…")), Some("win.add-google"));
+        menu.append_section(None, &add);
+        self.accounts_button.set_menu_model(Some(&menu));
         self.stack
             .set_visible_child_name(if accounts.is_empty() { "welcome" } else { "contacts" });
-        *self.accounts.borrow_mut() = accounts;
     }
 
     /// The account the filter shows; `None` for all.
@@ -350,20 +432,20 @@ impl Window {
     fn link(self: &Rc<Self>, provider: &'static str) {
         let root = self.root.clone();
         let weak = Rc::downgrade(self);
-        self.toast(match provider {
-            "google" => "Finish signing in to Google in your browser",
-            _ => "Finish signing in to iCloud in its window",
+        self.toast(&match provider {
+            "google" => tr("Finish signing in to Google in your browser"),
+            _ => tr("Finish signing in to iCloud in its window"),
         });
         background(
             move || {
-                let root = root.ok_or_else(|| Error::Other("no data directory ($HOME is not set)".into()))?;
+                let root = root.ok_or_else(|| Error::Other(tr("no data directory ($HOME is not set)")))?;
                 accounts::add(None, provider, &root)
             },
             move |result| {
                 let Some(this) = weak.upgrade() else { return };
                 match result {
                     Ok(Ok((name, _))) => {
-                        this.toast(&format!("Linked {}", account_title(&name, provider)));
+                        this.toast(&tr!("Linked {}", account_title(&name, provider)));
                         let other = if provider == "google" { "icloud" } else { "google" };
                         if this.accounts.borrow().iter().any(|(_, p)| p == other) {
                             this.offer_after_link();
@@ -380,10 +462,10 @@ impl Window {
     fn relogin(self: &Rc<Self>, name: String) {
         let root = self.root.clone();
         let weak = Rc::downgrade(self);
-        self.toast("Finish signing in in your browser");
+        self.toast(&tr("Finish signing in in your browser"));
         background(
             move || {
-                let root = root.ok_or_else(|| Error::Other("no data directory ($HOME is not set)".into()))?;
+                let root = root.ok_or_else(|| Error::Other(tr("no data directory ($HOME is not set)")))?;
                 accounts::login(&name, &root)
             },
             move |result| {
@@ -403,21 +485,23 @@ impl Window {
 
     fn confirm_unlink(self: &Rc<Self>, name: String) {
         let weak = Rc::downgrade(self);
-        let heading = format!("Unlink {name}?");
-        let body = "Its contacts stay in the account; this computer stops showing them and forgets its copy.";
-        omui::confirm(
+        let shown = name.clone();
+        confirm_destructive(
             &self.window,
-            &heading,
-            body,
-            "_Unlink",
-            omui::Appearance::Destructive,
+            move |dialog| {
+                dialog.set_heading(&tr!("Unlink {}?", shown));
+                dialog.set_body(&tr(
+                    "Its contacts stay in the account; this computer stops showing them and forgets its copy.",
+                ));
+                dialog.set_response_label("confirm", &tr("_Unlink"));
+            },
             move || {
                 let Some(this) = weak.upgrade() else { return };
                 let root = this.root.clone();
                 let weak = Rc::downgrade(&this);
                 background(
                     move || {
-                        let root = root.ok_or_else(|| Error::Other("no data directory ($HOME is not set)".into()))?;
+                        let root = root.ok_or_else(|| Error::Other(tr("no data directory ($HOME is not set)")))?;
                         accounts::remove(&name, &root)
                     },
                     move |result| {
@@ -528,7 +612,7 @@ impl Window {
                     Ok(Ok((out, shown))) => {
                         match shown {
                             Ok(shown) => *this.shown.borrow_mut() = shown,
-                            Err(e) => this.toast(&format!("Saved; cannot read the local copy: {e}")),
+                            Err(e) => this.toast(&tr!("Saved; cannot read the local copy: {}", e)),
                         }
                         done(&this, out);
                         this.show_list();
@@ -580,11 +664,17 @@ impl Window {
             .filter(|g| g.confidence == dedupe::Confidence::Likely)
             .map(|g| g.members.len())
             .sum();
+        self.duplicates.set(likely);
+        self.show_duplicate_title();
+        self.dup_offer.set_revealed(likely > 0);
+    }
+
+    fn show_duplicate_title(&self) {
+        let likely = self.duplicates.get();
         if likely > 0 {
             self.dup_offer
-                .set_title(&format!("{likely} contacts look like duplicates of each other."));
+                .set_title(&trn!("{n} contacts look like duplicates of each other.", likely));
         }
-        self.dup_offer.set_revealed(likely > 0);
     }
 
     /// Duplicates: those likely the same, merged all at once; those to
@@ -595,7 +685,9 @@ impl Window {
         let (groups, across) = self.find_duplicates(&shown);
         let (page, column) = omui::page(600);
         let dialog = omui::Dialog::new(Some("Duplicates"), None);
+        dialog.set_heading_translated("Duplicates");
         dialog.add_response("close", "_Close");
+        dialog.set_response_translated("close", "_Close");
         dialog.set_default_response("close");
         dialog.set_close_response("close");
         dialog.set_content_size(560, 640);
@@ -620,11 +712,12 @@ impl Window {
             if name.is_empty() {
                 name = members[keep].contact.display_name();
             }
-            let mut parts = vec![format!("{} cards", members.len())];
-            for (n, what) in [(merged.phones.len(), "phone"), (merged.emails.len(), "email")] {
-                if n > 0 {
-                    parts.push(format!("{n} {what}{}", if n == 1 { "" } else { "s" }));
-                }
+            let mut parts = vec![trn!("{n} cards", members.len())];
+            if !merged.phones.is_empty() {
+                parts.push(trn!("{n} phones", merged.phones.len()));
+            }
+            if !merged.emails.is_empty() {
+                parts.push(trn!("{n} emails", merged.emails.len()));
             }
             (keep, name, parts.join(" · "))
         };
@@ -635,11 +728,13 @@ impl Window {
             .collect();
         if !likely.is_empty() {
             let g = omui::Group::new(
-                "Likely the Same",
-                "Each becomes one card with every phone, email and address of them all. Every card is saved first to a backup file.",
+                &tr("Likely the Same"),
+                &tr(
+                    "Each becomes one card with every phone, email and address of them all. Every card is saved first to a backup file.",
+                ),
             );
             let merge_all = gtk::Button::builder()
-                .label("Merge All")
+                .label(tr("Merge All"))
                 .valign(gtk::Align::Center)
                 .css_classes(["suggested-action"])
                 .build();
@@ -647,7 +742,7 @@ impl Window {
             for members in &likely {
                 let (_, name, detail) = preview(members);
                 let names: Vec<String> = members.iter().map(|e| e.contact.display_name()).collect();
-                g.add(&omui::Row::new(&name, &format!("{detail} · from {}", names.join(", "))).widget);
+                g.add(&omui::Row::new(&name, &tr!("{} · from {}", detail, names.join(", "))).widget);
             }
             // Weak: the dialog owns the button.
             let (weak, d) = (Rc::downgrade(self), dialog.downgrade());
@@ -667,17 +762,20 @@ impl Window {
             .collect();
         if !check.is_empty() {
             let g = omui::Group::new(
-                "Check These",
-                "They share a name or a number, but may be different people.",
+                &tr("Check These"),
+                &tr("They share a name or a number, but may be different people."),
             );
             for (members, why) in check {
                 let names: Vec<String> = members.iter().map(|e| e.contact.display_name()).collect();
                 let row = omui::Row::new(&names.join(" · "), &why);
                 let apart = gtk::Button::builder()
-                    .label("Keep Apart")
+                    .label(tr("Keep Apart"))
                     .valign(gtk::Align::Center)
                     .build();
-                let merge = gtk::Button::builder().label("Merge").valign(gtk::Align::Center).build();
+                let merge = gtk::Button::builder()
+                    .label(tr("Merge"))
+                    .valign(gtk::Align::Center)
+                    .build();
                 row.add_suffix(&apart);
                 row.add_suffix(&merge);
                 let (weak, d, m) = (Rc::downgrade(self), dialog.downgrade(), members.clone());
@@ -701,7 +799,7 @@ impl Window {
                                 let Some(this) = weak.upgrade() else { return };
                                 match result {
                                     Ok(Ok(())) => {
-                                        this.toast("Kept apart: not shown as duplicates again");
+                                        this.toast(&tr("Kept apart: not shown as duplicates again"));
                                         let shown = this.shown.borrow().clone();
                                         this.show_duplicate_count(&shown);
                                     }
@@ -717,12 +815,12 @@ impl Window {
         }
         if !across.is_empty() {
             let g = omui::Group::new(
-                "In Both Accounts",
-                "Mirroring iCloud and Google pairs these, keeping one in each account.",
+                &tr("In Both Accounts"),
+                &tr("Mirroring iCloud and Google pairs these, keeping one in each account."),
             );
             for p in &across {
                 let (a, b) = (&shown.entries[p.a], &shown.entries[p.b]);
-                let title = format!(
+                let title = tr!(
                     "{} ({}) · {} ({})",
                     a.contact.display_name(),
                     a.label(),
@@ -734,7 +832,7 @@ impl Window {
             column.append(&g.widget);
         }
         if groups.is_empty() && across.is_empty() {
-            let none = omui::EmptyState::new(Some(name::USER), "No Duplicates", None);
+            let none = omui::EmptyState::new(Some(name::USER), &tr("No Duplicates"), None);
             dialog.set_extra_child(Some(none.widget.upcast_ref()));
         } else {
             dialog.set_extra_child(Some(page.upcast_ref()));
@@ -746,7 +844,7 @@ impl Window {
     /// names the backup file.
     fn merge_groups(self: &Rc<Self>, groups: Vec<Vec<Entry>>) {
         let Some(root) = self.root.clone() else { return };
-        self.toast("Merging…");
+        self.toast(&tr("Merging…"));
         self.write(
             move |book| {
                 let mut backup = None;
@@ -769,10 +867,7 @@ impl Window {
                         _ => f,
                     })
                     .unwrap_or_default();
-                this.toast(&format!(
-                    "Merged {n} group{}; the cards are saved in {file}",
-                    if n == 1 { "" } else { "s" }
-                ));
+                this.toast(&trn!("Merged {n} groups; the cards are saved in {}", n, file));
                 let shown = this.shown.borrow().clone();
                 this.show_duplicate_count(&shown);
             },
@@ -800,7 +895,7 @@ impl Window {
                     .map(|a| (a.provider, a.signed_in))
                     .collect();
                 let st = mirror::load(&root).unwrap_or_default();
-                Some(mirror::shown(&accounts, &st, cloud_contacts::cli::ago))
+                Some(mirror::shown(&accounts, &st))
             },
             move |result| {
                 let Some(this) = weak.upgrade() else { return };
@@ -808,7 +903,8 @@ impl Window {
                     Some(mirror::Shown::Switch { on, line, offer }) => {
                         this.ks_list.set_visible(true);
                         this.set_switch(on);
-                        this.ks_row.set_subtitle(&line);
+                        this.ks_row.set_subtitle(&mirror_text(&line));
+                        *this.mirror_line.borrow_mut() = Some(line);
                         this.ks_offer.set_revealed(offer);
                     }
                     _ => {
@@ -822,14 +918,16 @@ impl Window {
 
     /// Right after the second kind of account is linked.
     fn offer_after_link(self: &Rc<Self>) {
-        let dialog = omui::Dialog::new(
-            Some("Mirror Contacts Between iCloud and Google?"),
-            Some(
-                "A contact added, changed or deleted in one would be in the other too. You can turn this on later below the contacts.",
-            ),
+        // Made empty and then given its English, so an open dialog follows a switch of language.
+        let dialog = omui::Dialog::new(Some(""), Some(""));
+        dialog.set_heading_translated("Mirror Contacts Between iCloud and Google?");
+        dialog.set_body_translated(
+            "A contact added, changed or deleted in one would be in the other too. You can turn this on later below the contacts.",
         );
-        dialog.add_response("later", "_Not Now");
-        dialog.add_response("on", "_Turn On…");
+        dialog.add_response("later", "");
+        dialog.add_response("on", "");
+        dialog.set_response_translated("later", "_Not Now");
+        dialog.set_response_translated("on", "_Turn On…");
         dialog.set_response_appearance("on", omui::Appearance::Suggested);
         dialog.set_default_response("on");
         dialog.set_close_response("later");
@@ -844,7 +942,7 @@ impl Window {
 
     /// The two accounts' providers, opened, for the engine.
     fn pair_book(root: Option<PathBuf>, t: Arc<SessionTransport>) -> cloud_contacts::error::Result<(PathBuf, Book)> {
-        let root = root.ok_or_else(|| Error::Other("no data directory ($HOME is not set)".into()))?;
+        let root = root.ok_or_else(|| Error::Other(tr("no data directory ($HOME is not set)")))?;
         let book = open(&config::load()?, Some(root.clone()), t)?;
         Ok((root, book))
     }
@@ -854,12 +952,12 @@ impl Window {
     fn mirror_review(self: &Rc<Self>) {
         let (t, root) = (self.transport.clone(), self.root.clone());
         let weak = Rc::downgrade(self);
-        self.toast("Looking at both accounts…");
+        self.toast(&tr("Looking at both accounts…"));
         background(
             move || -> Result<(mirror::Plan, Vec<(String, String)>), String> {
                 let (root, book) = Self::pair_book(root, t).map_err(|e| e.to_string())?;
                 let mirror::Pairing::Ready(i, g) = mirror::pairing_of(&book) else {
-                    return Err("mirroring contacts needs an iCloud and a Google account".into());
+                    return Err(tr("mirroring contacts needs an iCloud and a Google account"));
                 };
                 let engine = mirror::Engine::new(&root, &*i.provider_impl, &*g.provider_impl);
                 let plan = engine.plan().map_err(|e| e.to_string())?;
@@ -890,18 +988,22 @@ impl Window {
 
     fn review_dialog(self: &Rc<Self>, plan: mirror::Plan, names: Vec<(String, String)>) {
         let body = gtk::Box::new(gtk::Orientation::Vertical, 12);
-        let summary = format!(
-            "{} contacts in both accounts will be joined. {} will be copied to Google and {} to iCloud. From then on, a contact added, changed or deleted in one is in the other too, while this computer is on. Photos and Google's groups stay where they are.",
-            plan.pairs.len(),
-            plan.to_google,
-            plan.to_icloud
-        );
+        // Whole sentences, one count each, so that each language gives each count its own plural form.
+        let summary = [
+            trn!("{n} contacts in both accounts will be joined.", plan.pairs.len()),
+            trn!("{n} contacts will be copied to Google.", plan.to_google),
+            trn!("{n} contacts will be copied to iCloud.", plan.to_icloud),
+            tr(
+                "From then on, a contact added, changed or deleted in one is in the other too, while this computer is on. Photos and Google's groups stay where they are.",
+            ),
+        ]
+        .join(" ");
         body.append(&gtk::Label::builder().label(&summary).wrap(true).xalign(0.0).build());
         let mut choices = Vec::new();
         if !plan.doubtful.is_empty() {
             body.append(
                 &gtk::Label::builder()
-                    .label("These may be one person. Neither is copied until you decide:")
+                    .label(tr("These may be one person. Neither is copied until you decide:"))
                     .wrap(true)
                     .xalign(0.0)
                     .css_classes(["heading"])
@@ -911,9 +1013,9 @@ impl Window {
                 .selection_mode(gtk::SelectionMode::None)
                 .css_classes(["boxed-list"])
                 .build();
-            let options = gtk::StringList::new(&["Decide Later", "Same Person", "Different People"]);
+            let options = gtk::StringList::new(&[&tr("Decide Later"), &tr("Same Person"), &tr("Different People")]);
             for (p, (i, g)) in plan.doubtful.iter().zip(&names) {
-                let (row, choice) = omui::combo_row(&format!("{i} (iCloud) · {g} (Google)"), &p.why, &options, 0);
+                let (row, choice) = omui::combo_row(&tr!("{} (iCloud) · {} (Google)", i, g), &p.why, &options, 0);
                 list.append(&row.widget);
                 choices.push((p.clone(), choice));
             }
@@ -926,10 +1028,13 @@ impl Window {
                     .build(),
             );
         }
-        let dialog = omui::Dialog::new(Some("Mirror Contacts Between iCloud and Google"), None);
+        let dialog = omui::Dialog::new(Some(""), None);
+        dialog.set_heading_translated("Mirror Contacts Between iCloud and Google");
         dialog.set_extra_child(Some(body.upcast_ref()));
-        dialog.add_response("cancel", "_Cancel");
-        dialog.add_response("on", "_Turn On");
+        dialog.add_response("cancel", "");
+        dialog.add_response("on", "");
+        dialog.set_response_translated("cancel", "_Cancel");
+        dialog.set_response_translated("on", "_Turn On");
         dialog.set_response_appearance("on", omui::Appearance::Suggested);
         dialog.set_default_response("on");
         dialog.set_close_response("cancel");
@@ -957,14 +1062,14 @@ impl Window {
                     mirror::turn_on(&root, &plan, &decisions).map_err(|e| e.to_string())?;
                     let warning = mirror::timer(true);
                     let mirror::Pairing::Ready(i, g) = mirror::pairing_of(&book) else {
-                        return Err("an account went away".into());
+                        return Err(tr("an account went away"));
                     };
                     let mut engine = mirror::Engine::new(&root, &*i.provider_impl, &*g.provider_impl);
                     let done = match engine.run(false) {
-                        Ok(_) => "iCloud and Google contacts are mirrored now".to_string(),
+                        Ok(_) => tr("iCloud and Google contacts are mirrored now"),
                         Err(e) => e.to_string(),
                     };
-                    Ok(warning.map_or(done.clone(), |w| format!("{done} ({w})")))
+                    Ok(warning.map_or(done.clone(), |w| tr!("{} ({})", done, w)))
                 },
                 move |result| {
                     let Some(this) = weak.upgrade() else { return };
@@ -988,7 +1093,7 @@ impl Window {
                 mirror::turn_off(&root).ok()?;
                 Some(
                     mirror::timer(false)
-                        .unwrap_or_else(|| "Turned off: both accounts keep their contacts as they are".into()),
+                        .unwrap_or_else(|| tr("Turned off: both accounts keep their contacts as they are")),
                 )
             },
             move |result| {
@@ -1029,22 +1134,19 @@ impl Window {
 
     fn confirm_delete(self: &Rc<Self>, c: Entry) {
         let name = c.contact.display_name();
-        let body = match c.provider.as_str() {
-            "google" => {
-                "The contact is deleted from your Google account on all your devices. Google keeps it in its Trash for 30 days."
-            }
-            _ => {
-                "The contact is deleted from iCloud on all your devices. iCloud keeps no Recently Deleted for contacts."
-            }
-        };
+        let (shown, google) = (name.clone(), c.provider == "google");
         let weak = Rc::downgrade(self);
-        let heading = format!("Delete {name}?");
-        omui::confirm(
+        confirm_destructive(
             &self.window,
-            &heading,
-            body,
-            "_Delete",
-            omui::Appearance::Destructive,
+            move |dialog| {
+                dialog.set_heading(&tr!("Delete {}?", shown));
+                dialog.set_body(&if google {
+                    tr("The contact is deleted from your Google account on all your devices. Google keeps it in its Trash for 30 days.")
+                } else {
+                    tr("The contact is deleted from iCloud on all your devices. iCloud keeps no Recently Deleted for contacts.")
+                });
+                dialog.set_response_label("confirm", &tr("_Delete"));
+            },
             move || {
                 let Some(this) = weak.upgrade() else { return };
                 this.write(
@@ -1052,7 +1154,7 @@ impl Window {
                     move |this, warning| {
                         this.selected.borrow_mut().clear();
                         this.split.set_show_content(false);
-                        this.toast(&warning.unwrap_or_else(|| format!("Deleted {name}")));
+                        this.toast(&warning.unwrap_or_else(|| tr!("Deleted {}", name)));
                     },
                     |_| {},
                 );
@@ -1060,32 +1162,63 @@ impl Window {
         );
     }
 
+    /// Asks before typed work is lost. Only Discard loses it: Keep Editing, Escape and Enter all run `keep`.
+    fn ask_discard(self: &Rc<Self>, keep: impl FnOnce(&Rc<Self>) + 'static, discard: impl FnOnce(&Rc<Self>) + 'static) {
+        self.asking.set(true);
+        let dialog = omui::Dialog::new(Some(""), Some(""));
+        dialog.set_heading_translated("Discard your changes?");
+        dialog.set_body_translated("What you typed for this contact is not saved.");
+        dialog.add_response("keep", "");
+        dialog.add_response("discard", "");
+        dialog.set_response_translated("keep", "_Keep Editing");
+        dialog.set_response_translated("discard", "_Discard");
+        dialog.set_response_appearance("discard", omui::Appearance::Destructive);
+        dialog.set_default_response("keep");
+        dialog.set_close_response("keep");
+        let weak = Rc::downgrade(self);
+        let answers = Cell::new(Some((keep, discard)));
+        dialog.connect_response(move |_, id| {
+            let (Some(this), Some((keep, discard))) = (weak.upgrade(), answers.take()) else {
+                return;
+            };
+            this.asking.set(false);
+            if id == "discard" {
+                discard(&this);
+            } else {
+                keep(&this);
+            }
+        });
+        dialog.present(&self.window);
+    }
+
     /// The add (`contact` `None`) or edit dialog, filled from the contact's
-    /// values, or from `draft`: what was typed before a save that failed.
-    fn edit_draft(self: &Rc<Self>, contact: Option<Entry>, draft: Option<Draft>) {
+    /// values, or from `draft`: what was typed before a save that failed, or
+    /// before a Cancel that was taken back. `account` is the account a new
+    /// contact was going to then.
+    fn edit_draft(self: &Rc<Self>, contact: Option<Entry>, draft: Option<Draft>, account: Option<String>) {
         let accounts = self.accounts.borrow().clone();
         if contact.is_none() && accounts.is_empty() {
-            self.toast("Link an account first");
+            self.toast(&tr("Link an account first"));
             return;
         }
         let before = contact.as_ref().map(|e| Draft::of(&e.contact)).unwrap_or_default();
         let draft = draft.unwrap_or_else(|| before.clone());
-        let heading = if contact.is_some() {
-            "Edit Contact"
+        let dialog = omui::Dialog::new(Some(""), None);
+        if contact.is_some() {
+            dialog.set_heading_translated("Edit Contact");
         } else {
-            "New Contact"
-        };
-        let dialog = omui::Dialog::new(Some(heading), None);
+            dialog.set_heading_translated("New Contact");
+        }
         let body = gtk::Box::new(gtk::Orientation::Vertical, 12);
         // A new contact goes to one account: the one the sidebar shows, else
         // the first; with several, the person picks.
         let titles: Vec<String> = accounts.iter().map(|(n, p)| account_title(n, p)).collect();
         let account_list = gtk::StringList::new(&titles.iter().map(String::as_str).collect::<Vec<_>>());
-        let start = self
-            .filter_account()
+        let start = account
+            .or_else(|| self.filter_account())
             .and_then(|f| accounts.iter().position(|(n, _)| *n == f))
             .unwrap_or(0);
-        let (account_row, account_choice) = omui::combo_row("Account", "", &account_list, start as u32);
+        let (account_row, account_choice) = omui::combo_row(&tr("Account"), "", &account_list, start as u32);
         let group = |rows: &[&omui::Row]| {
             let list = gtk::ListBox::builder()
                 .selection_mode(gtk::SelectionMode::None)
@@ -1101,7 +1234,7 @@ impl Window {
         }
         let scalars: Vec<(Field, (omui::Row, gtk::Entry))> = SCALARS
             .iter()
-            .map(|(f, title)| (*f, omui::entry_row(title, draft.scalar(*f))))
+            .map(|(f, _)| (*f, omui::entry_row(&field_title(*f), draft.scalar(*f))))
             .collect();
         group(&scalars[..3].iter().map(|(_, (r, _))| r).collect::<Vec<_>>());
         group(&scalars[3..].iter().map(|(_, (r, _))| r).collect::<Vec<_>>());
@@ -1113,21 +1246,16 @@ impl Window {
         // One row per value, titled by its label, and an empty one to add.
         let mut multis: Vec<(Multi, Vec<ValueRow>)> = Vec::new();
         for (m, add_title) in [
-            (Multi::Phone, "Add phone (work=+1 555 0100)"),
-            (Multi::Email, "Add email"),
-            (Multi::Url, "Add URL"),
+            (Multi::Phone, tr("Add phone (work=+1 555 0100)")),
+            (Multi::Email, tr("Add email")),
+            (Multi::Url, tr("Add URL")),
         ] {
             let mut rows: Vec<(Option<Row>, (omui::Row, gtk::Entry))> = draft
                 .values(m)
                 .iter()
-                .map(|r| {
-                    (
-                        Some(r.clone()),
-                        omui::entry_row(&model::label_display(&r.label), &r.value),
-                    )
-                })
+                .map(|r| (Some(r.clone()), omui::entry_row(&label_title(&r.label), &r.value)))
                 .collect();
-            rows.push((None, omui::entry_row(add_title, "")));
+            rows.push((None, omui::entry_row(&add_title, "")));
             group(&rows.iter().map(|(_, (r, _))| r).collect::<Vec<_>>());
             for (_, (_, e)) in &rows {
                 e.set_activates_default(true);
@@ -1167,13 +1295,15 @@ impl Window {
             .max_content_height(520)
             .accessible_role(gtk::AccessibleRole::Form)
             .build();
-        fields.update_property(&[gtk::accessible::Property::Label("Fields")]);
+        fields.update_property(&[gtk::accessible::Property::Label(&tr("Fields"))]);
         let content = gtk::Box::new(gtk::Orientation::Vertical, 12);
         content.append(&fields);
         content.append(&problem);
         dialog.set_extra_child(Some(content.upcast_ref()));
-        dialog.add_response("cancel", "_Cancel");
-        dialog.add_response("save", "_Save");
+        dialog.add_response("cancel", "");
+        dialog.add_response("save", "");
+        dialog.set_response_translated("cancel", "_Cancel");
+        dialog.set_response_translated("save", "_Save");
         dialog.set_response_appearance("save", omui::Appearance::Suggested);
         dialog.set_default_response("save");
         dialog.set_close_response("cancel");
@@ -1216,7 +1346,7 @@ impl Window {
             let (dialog, problem, read, before) = (dialog.downgrade(), problem.clone(), read.clone(), before.clone());
             move || {
                 let Some(dialog) = dialog.upgrade() else { return };
-                let text = read().problem(&before);
+                let text = read().problem(&before).map(|p| problem_text(&p));
                 problem.set_visible(text.is_some());
                 problem.set_label(text.as_deref().unwrap_or(""));
                 dialog.set_response_enabled("save", text.is_none());
@@ -1232,23 +1362,44 @@ impl Window {
                 r.connect_changed(move |_| validate());
             }
         }
-        validate();
+        // Now, and after a switch of language, so what holds Save back is said in the new one.
+        dialog.bind({
+            let validate = validate.clone();
+            move |_| validate()
+        });
 
+        // Unsaved is what saving would change, not whether a key was pressed: an edit typed and undone, or typed
+        // back to what the contact has, is no work to ask about.
+        *self.editing.borrow_mut() = Some(Rc::new({
+            let (read, before) = (read.clone(), before.clone());
+            move || !read().changes(&before).is_empty()
+        }));
         let weak = Rc::downgrade(self);
         dialog.connect_response(move |_, id| {
-            let (Some(this), "save") = (weak.upgrade(), id) else {
-                return;
-            };
+            let Some(this) = weak.upgrade() else { return };
             let typed = read();
             let changes = typed.changes(&before);
-            let retry = {
-                let (contact, typed) = (contact.clone(), typed.clone());
-                move |this: &Rc<Window>| this.edit_draft(contact, Some(typed))
-            };
             let account = accounts
                 .get(account_choice.selected() as usize)
                 .map(|(n, _)| n.clone())
                 .unwrap_or_default();
+            let retry = {
+                let (contact, typed, account) = (contact.clone(), typed.clone(), account.clone());
+                move |this: &Rc<Window>| this.edit_draft(contact, Some(typed), Some(account))
+            };
+            if id != "save" {
+                // Cancel and Escape close the dialog. With work in it they ask first, and anything but Discard
+                // opens it again as it was; until then the window still counts the work as unsaved.
+                if changes.is_empty() {
+                    this.editing.take();
+                } else {
+                    this.ask_discard(retry, |this| {
+                        this.editing.take();
+                    });
+                }
+                return;
+            }
+            this.editing.take();
             match contact.clone() {
                 None => this.write(
                     {
@@ -1260,7 +1411,7 @@ impl Window {
                         this.toast(
                             &saved
                                 .warning
-                                .unwrap_or_else(|| format!("Added {}", saved.value.display_name())),
+                                .unwrap_or_else(|| tr!("Added {}", saved.value.display_name())),
                         );
                     },
                     retry,
@@ -1320,10 +1471,10 @@ impl Window {
         });
         self.list.invalidate_filter();
         // A search that finds nobody is not an account without contacts.
-        self.list_empty.set_title(if query.trim().is_empty() {
-            "No Contacts"
+        self.list_empty.set_title(&if query.trim().is_empty() {
+            tr("No Contacts")
         } else {
-            "No Results"
+            tr("No Results")
         });
         let shown = self.list.selected_row().is_some_and(|r| r.is_child_visible());
         if !shown && !self.split.is_collapsed() {
@@ -1366,7 +1517,7 @@ impl Window {
         );
         let job = c.work(" · ");
         let nickname = c.field(Field::Nickname);
-        let account = format!("In {}", account_title(&entry.account, &entry.provider));
+        let account = tr!("In {}", account_title(&entry.account, &entry.provider));
         for line in [job.as_str(), nickname, account.as_str()] {
             if !line.is_empty() {
                 self.card.append(
@@ -1403,7 +1554,7 @@ impl Window {
             let rows = c
                 .values(m)
                 .into_iter()
-                .map(|l| self.value_row(&model::label_display(&l.label), &l.value, action(m, &l.value)))
+                .map(|l| self.value_row(&label_title(&l.label), &l.value, action(m, &l.value)))
                 .collect();
             group(rows);
         }
@@ -1421,34 +1572,41 @@ impl Window {
                     .filter(|s| !s.is_empty())
                     .collect::<Vec<_>>()
                     .join("\n");
-                self.value_row(&model::label_display(&a.label), &text, Action::Copy)
+                self.value_row(&label_title(&a.label), &text, Action::Copy)
             })
             .collect();
         group(addresses);
         let birthday = c.field(Field::Birthday);
         if !birthday.is_empty() {
-            group(vec![self.value_row(
-                "birthday",
+            // Shown as the language writes a date; a copy is the date as it is stored, which any app reads.
+            group(vec![self.value_row_showing(
+                &tr("birthday"),
+                &birthday_text(birthday),
                 &model::birthday_display(birthday),
                 Action::Copy,
             )]);
         }
         let notes = c.field(Field::Notes);
         if !notes.is_empty() {
-            group(vec![self.value_row("notes", notes, Action::Copy)]);
+            group(vec![self.value_row(&tr("notes"), notes, Action::Copy)]);
         }
     }
 
     /// A row showing `value` under `label`; a click copies or opens it.
     fn value_row(self: &Rc<Self>, label: &str, value: &str, action: Action) -> omui::Row {
-        let row = omui::Row::new(label, value).property();
+        self.value_row_showing(label, value, value, action)
+    }
+
+    /// A row showing `shown` under `label`, whose click copies `value` (or opens it).
+    fn value_row_showing(self: &Rc<Self>, label: &str, shown: &str, value: &str, action: Action) -> omui::Row {
+        let row = omui::Row::new(label, shown).property();
         row.set_subtitle_selectable(true);
         let (icon, tip) = match &action {
-            Action::Copy => (name::COPY, "Copy"),
-            Action::Open(_) => (name::EXTERNAL_LINK, "Open"),
+            Action::Copy => (name::COPY, tr("Copy")),
+            Action::Open(_) => (name::EXTERNAL_LINK, tr("Open")),
         };
         let hint = omui::icon(icon);
-        hint.set_tooltip_text(Some(tip));
+        hint.set_tooltip_text(Some(&tip));
         row.add_suffix(&hint);
         let weak = Rc::downgrade(self);
         let value = value.to_owned();
@@ -1457,13 +1615,13 @@ impl Window {
             match &action {
                 Action::Copy => {
                     this.window.clipboard().set_text(&value);
-                    this.toast("Copied");
+                    this.toast(&tr("Copied"));
                 }
                 Action::Open(uri) => {
                     let weak = Rc::downgrade(&this);
                     gtk::UriLauncher::new(uri).launch(Some(&this.window), gio::Cancellable::NONE, move |r| {
                         if let (Err(e), Some(this)) = (r, weak.upgrade()) {
-                            this.toast(&format!("Cannot open it: {e}"));
+                            this.toast(&tr!("Cannot open it: {}", e));
                         }
                     });
                 }
@@ -1490,7 +1648,7 @@ fn account_title(name: &str, provider: &str) -> String {
     if name == provider {
         label.to_string()
     } else {
-        format!("{label} ({name})")
+        tr!("{} ({})", label, name)
     }
 }
 
@@ -1511,7 +1669,7 @@ fn contact_row(e: &Entry, several: bool) -> gtk::ListBoxRow {
     );
     let company = c.field(Field::Company);
     let sub = if me {
-        "My Card".to_string()
+        tr("My Card")
     } else {
         let company = if c.is_company() { "" } else { company };
         let account = if several {
@@ -1538,7 +1696,7 @@ fn contact_row(e: &Entry, several: bool) -> gtk::ListBoxRow {
     b.append(&text);
     let row = gtk::ListBoxRow::builder().child(&b).build();
     // A screen reader would otherwise read the avatar's initials first.
-    let spoken = if sub.is_empty() { name } else { format!("{name}, {sub}") };
+    let spoken = if sub.is_empty() { name } else { tr!("{}, {}", name, sub) };
     row.update_property(&[gtk::accessible::Property::Label(&spoken)]);
     row.set_widget_name(&e.id());
     row
@@ -1547,38 +1705,46 @@ fn contact_row(e: &Entry, several: bool) -> gtk::ListBoxRow {
 fn build(app: &gtk::Application, banner: SignInBanner) -> Window {
     // Sidebar: search and the contacts.
     let search = gtk::SearchEntry::builder()
-        .placeholder_text("Search (Ctrl+F)")
         .margin_start(8)
         .margin_end(8)
         .margin_bottom(6)
         .build();
+    i18n::bind(&search, |search| {
+        search.set_placeholder_text(Some(&tr("Search (Ctrl+F)")));
+    });
     let list = gtk::ListBox::builder()
         .selection_mode(gtk::SelectionMode::Single)
         .activate_on_single_click(true)
         .build();
-    let list_empty = omui::EmptyState::new(Some(name::USER), "No Contacts", None).compact();
+    let list_empty = omui::EmptyState::new(Some(name::USER), &tr("No Contacts"), None).compact();
     list.set_placeholder(Some(&list_empty.widget));
-    let sidebar_header = omui::header(Some(omui::Title::new("Contacts", "").widget.upcast_ref()));
+    let title = omui::Title::new(&tr("Contacts"), "");
+    let sidebar_header = omui::header(Some(title.widget.upcast_ref()));
+    i18n::on_change(&sidebar_header, move || title.set_title(&tr("Contacts")));
     // Refresh (Ctrl+R) and Duplicates in one menu: with three buttons the
-    // sidebar still has room to say "Contacts"
+    // sidebar still has room to say "Contacts". Its items are written by
+    // `main_menu_items`, again in a new language.
     let main_menu = gio::Menu::new();
-    main_menu.append(Some("Refresh"), Some("win.refresh"));
-    main_menu.append(Some("Duplicates…"), Some("win.duplicates"));
-    sidebar_header.pack_start(&omui::icon_menu_button(name::MENU, "Main Menu", &main_menu));
-    let accounts_menu = gio::Menu::new();
-    sidebar_header.pack_end(&omui::icon_menu_button(name::USERS, "Accounts", &accounts_menu));
-    let new = omui::icon_button(name::ADD, "New Contact (Ctrl+N)");
+    main_menu_items(&main_menu);
+    let main_button = omui::icon_menu_button(name::MENU, "", &main_menu);
+    i18n::bind_tooltip(&main_button, "Main Menu");
+    sidebar_header.pack_start(&main_button);
+    let accounts_button = omui::icon_menu_button(name::USERS, "", &gio::Menu::new());
+    i18n::bind_tooltip(&accounts_button, "Accounts");
+    sidebar_header.pack_end(&accounts_button);
+    let new = omui::icon_button(name::ADD, "");
+    i18n::bind_tooltip(&new, "New Contact (Ctrl+N)");
     new.set_action_name(Some("win.new"));
     sidebar_header.pack_end(&new);
-    let filter_names = gtk::StringList::new(&["All Accounts"]);
+    let filter_names = gtk::StringList::new(&[&tr("All Accounts")]);
     let filter = gtk::DropDown::builder()
         .model(&filter_names)
         .margin_start(8)
         .margin_end(8)
         .margin_bottom(6)
         .visible(false)
-        .tooltip_text("Show one account's contacts")
         .build();
+    i18n::bind_tooltip(&filter, "Show one account's contacts");
     let sidebar_body = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
         .css_classes(["sidebar"])
@@ -1587,7 +1753,7 @@ fn build(app: &gtk::Application, banner: SignInBanner) -> Window {
     sidebar_body.append(&filter);
     sidebar_body.append(&search);
     sidebar_body.append(&gtk::ScrolledWindow::builder().child(&list).vexpand(true).build());
-    let (ks_row, ks_switch) = omui::switch_row("Mirror contacts between iCloud and Google", "Off", false);
+    let (ks_row, ks_switch) = omui::switch_row(&tr("Mirror contacts between iCloud and Google"), &tr("Off"), false);
     let ks_list = gtk::ListBox::builder()
         .selection_mode(gtk::SelectionMode::None)
         .css_classes(["boxed-list"])
@@ -1614,10 +1780,13 @@ fn build(app: &gtk::Application, banner: SignInBanner) -> Window {
 
     // Content: the chosen card, with a way back to the list when the two
     // do not fit side by side.
-    let back = omui::icon_button(name::BACK, "Contacts");
-    let edit_button = omui::icon_button(name::EDIT, "Edit (Ctrl+E)");
+    let back = omui::icon_button(name::BACK, "");
+    i18n::bind_tooltip(&back, "Contacts");
+    let edit_button = omui::icon_button(name::EDIT, "");
+    i18n::bind_tooltip(&edit_button, "Edit (Ctrl+E)");
     edit_button.set_action_name(Some("win.edit"));
-    let delete_button = omui::icon_button(name::DELETE, "Delete");
+    let delete_button = omui::icon_button(name::DELETE, "");
+    i18n::bind_tooltip(&delete_button, "Delete");
     delete_button.set_action_name(Some("win.delete"));
     let content_header = omui::header_without_title();
     content_header.pack_start(&back);
@@ -1638,10 +1807,8 @@ fn build(app: &gtk::Application, banner: SignInBanner) -> Window {
             .build(),
         Some("card"),
     );
-    card_stack.add_named(
-        &omui::EmptyState::new(Some(name::USER), "No Contact Selected", None).widget,
-        Some("empty"),
-    );
+    let no_card = omui::EmptyState::new(Some(name::USER), &tr("No Contact Selected"), None);
+    card_stack.add_named(&no_card.widget, Some("empty"));
     let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
     content.append(&content_header);
     content.append(&card_stack);
@@ -1666,18 +1833,18 @@ fn build(app: &gtk::Application, banner: SignInBanner) -> Window {
     });
     let body = gtk::Box::new(gtk::Orientation::Vertical, 0);
     body.append(&banner.widget);
-    let ks_offer = omui::Banner::new("Your iCloud and Google contacts are separate. Mirror them?", None);
-    ks_offer
-        .add_button("Not Now", false)
-        .set_action_name(Some("win.mirror-not-now"));
-    ks_offer
-        .add_button("Turn On…", true)
-        .set_action_name(Some("win.mirror-review"));
+    let ks_offer = omui::Banner::new(&tr("Your iCloud and Google contacts are separate. Mirror them?"), None);
+    let not_now = ks_offer.add_button("", false);
+    i18n::bind_label(&not_now, "Not Now");
+    not_now.set_action_name(Some("win.mirror-not-now"));
+    let turn_on = ks_offer.add_button("", true);
+    i18n::bind_label(&turn_on, "Turn On…");
+    turn_on.set_action_name(Some("win.mirror-review"));
     body.append(&ks_offer.widget);
     let dup_offer = omui::Banner::new("", None);
-    dup_offer
-        .add_button("Review…", false)
-        .set_action_name(Some("win.duplicates"));
+    let review = dup_offer.add_button("", false);
+    i18n::bind_label(&review, "Review…");
+    review.set_action_name(Some("win.duplicates"));
     body.append(&dup_offer.widget);
     split.widget.set_vexpand(true);
     body.append(&split.widget);
@@ -1687,35 +1854,43 @@ fn build(app: &gtk::Application, banner: SignInBanner) -> Window {
         .spacing(12)
         .halign(gtk::Align::Center)
         .build();
-    for (label, action) in [
-        ("Add iCloud Account…", "win.add-icloud"),
-        ("Add Google Account…", "win.add-google"),
-    ] {
-        welcome_buttons.append(
-            &gtk::Button::builder()
-                .label(label)
-                .action_name(action)
-                .css_classes(["pill", "suggested-action"])
-                .build(),
-        );
+    for action in ["win.add-icloud", "win.add-google"] {
+        let button = gtk::Button::builder()
+            .action_name(action)
+            .css_classes(["pill", "suggested-action"])
+            .build();
+        if action == "win.add-icloud" {
+            i18n::bind_label(&button, "Add iCloud Account…");
+        } else {
+            i18n::bind_label(&button, "Add Google Account…");
+        }
+        welcome_buttons.append(&button);
     }
     let welcome_page = omui::EmptyState::new(
         Some(name::USER),
-        "Your Contacts",
-        Some("Link your iCloud or Google account to see its contacts here. Each account keeps its own."),
+        &tr("Your Contacts"),
+        Some(&tr(
+            "Link your iCloud or Google account to see its contacts here. Each account keeps its own.",
+        )),
     );
     welcome_page.set_child(Some(welcome_buttons.upcast_ref()));
     let welcome = gtk::Box::new(gtk::Orientation::Vertical, 0);
     welcome.append(&omui::header(None));
     welcome.append(&welcome_page.widget);
+    let anchor = welcome_page.widget.clone();
+    i18n::on_change(&anchor, move || {
+        welcome_page.set_title(&tr("Your Contacts"));
+        welcome_page.set_description(&tr(
+            "Link your iCloud or Google account to see its contacts here. Each account keeps its own.",
+        ));
+    });
     let stack = gtk::Stack::new();
     stack.add_named(&body, Some("contacts"));
     stack.add_named(&welcome, Some("welcome"));
 
     let window = gtk::ApplicationWindow::builder()
         .application(app)
-        .title("Contacts")
-        .icon_name(super::APP_ID)
+        .icon_name(super::NAME)
         .default_width(900)
         .default_height(640)
         .width_request(360)
@@ -1723,6 +1898,7 @@ fn build(app: &gtk::Application, banner: SignInBanner) -> Window {
         .build();
     // The header bars are the panes' own, in the content.
     omui::claim_titlebar(&window);
+    i18n::bind(&window, |window| window.set_title(Some(&tr("Contacts"))));
     let shell = omui::Shell::new(&window, &stack);
 
     Window {
@@ -1739,7 +1915,7 @@ fn build(app: &gtk::Application, banner: SignInBanner) -> Window {
         delete_button,
         filter,
         filter_names,
-        accounts_menu,
+        accounts_button: accounts_button.clone(),
         stack,
         transport: Arc::default(),
         root: Store::default_root(),
@@ -1755,6 +1931,13 @@ fn build(app: &gtk::Application, banner: SignInBanner) -> Window {
         ks_switch,
         ks_shown: Cell::new(false),
         dup_offer,
+        editing: RefCell::default(),
+        asking: Cell::new(false),
+        main_menu,
+        no_card,
+        shortcuts: omui::ShortcutOverlay::new(shortcut_sections),
+        mirror_line: RefCell::default(),
+        duplicates: Cell::new(0),
     }
 }
 
@@ -1764,7 +1947,7 @@ fn open(
     root: Option<PathBuf>,
     t: Arc<SessionTransport>,
 ) -> cloud_contacts::error::Result<Book> {
-    let root = root.ok_or_else(|| Error::Other("no data directory ($HOME is not set)".into()))?;
+    let root = root.ok_or_else(|| Error::Other(tr("no data directory ($HOME is not set)")))?;
     Book::open(config, root, t)
 }
 
@@ -1774,4 +1957,159 @@ fn names(book: &Book) -> Vec<(String, String)> {
         .iter()
         .map(|a| (a.name.clone(), a.provider.clone()))
         .collect()
+}
+
+/// The sidebar menu's items, in the language of the moment.
+fn main_menu_items(menu: &gio::Menu) {
+    menu.remove_all();
+    menu.append(Some(&tr("Refresh")), Some("win.refresh"));
+    menu.append(Some(&tr("Duplicates…")), Some("win.duplicates"));
+}
+
+/// Every shortcut, for the overlay, keys that do the same on one row as separate key caps; README.md's Keyboard table
+/// lists the same.
+fn shortcut_sections() -> Vec<omui::ShortcutSection> {
+    vec![
+        omui::ShortcutSection::new(
+            &tr("Contacts"),
+            &[
+                ("Ctrl+N", &tr("New contact")),
+                ("Ctrl+E", &tr("Edit the chosen contact")),
+                ("Ctrl+F", &tr("Search")),
+                ("Enter", &tr("In the search, open the first match")),
+            ],
+        )
+        .alternatives(&["Up", "Down"], &tr("The contact above or below in the list"))
+        .alternatives(&["Ctrl+R", "F5"], &tr("Fetch every account now"))
+        .alternatives(
+            &["Escape", "Alt+Left"],
+            &tr("In a narrow window, back from a contact to the list"),
+        ),
+        omui::ShortcutSection::new(&tr("Window"), &[])
+            .alternatives(&["F1", "Ctrl+?"], &tr("Show or hide the shortcuts"))
+            .alternatives(&["Ctrl+W", "Ctrl+Q"], &tr("Close the window")),
+        omui::ShortcutSection::new(
+            &tr("Dialogs"),
+            &[
+                ("Enter", &tr("Save, or the dialog's default answer")),
+                ("Escape", &tr("Cancel; with something typed, it asks first")),
+                ("Alt+S", &tr("Save")),
+                ("Alt+C", &tr("Cancel")),
+            ],
+        )
+        .alternatives(&["Ctrl+Z", "Ctrl+Shift+Z"], &tr("Undo and redo in a field")),
+    ]
+}
+
+/// The edit dialog's title for one of its single-line fields.
+fn field_title(field: Field) -> String {
+    match field {
+        Field::First => tr("First name"),
+        Field::Last => tr("Last name"),
+        Field::Company => tr("Company"),
+        Field::JobTitle => tr("Job title"),
+        Field::Nickname => tr("Nickname"),
+        Field::Birthday => tr("Birthday (1990-05-01, or 05-01)"),
+        // Not among the dialog's fields (`SCALARS`); named as the library names it.
+        other => SCALARS
+            .iter()
+            .find(|(f, _)| *f == other)
+            .map(|(_, title)| i18n::translate(title))
+            .unwrap_or_default(),
+    }
+}
+
+/// A phone's, email's, URL's or address's label as the window shows it: the standard ones iCloud stores in capitals
+/// in the person's language, and one the person typed as they typed it.
+fn label_title(label: &str) -> String {
+    match label {
+        "" | "OTHER" => tr("other"),
+        "MOBILE" => tr("mobile"),
+        "HOME" => tr("home"),
+        "WORK" => tr("work"),
+        "MAIN" => tr("main"),
+        "PAGER" => tr("pager"),
+        "HOME FAX" => tr("home fax"),
+        "WORK FAX" => tr("work fax"),
+        "HOMEPAGE" => tr("homepage"),
+        "SCHOOL" => tr("school"),
+        _ => model::label_display(label),
+    }
+}
+
+/// Why Save is held back, in the person's language.
+fn problem_text(problem: &Problem) -> String {
+    match problem {
+        Problem::Birthday(typed) => tr!("birthday \"{}\": use YYYY-MM-DD, or MM-DD without a year", typed),
+        Problem::Empty(Multi::Phone) => tr("an empty phone number"),
+        Problem::Empty(Multi::Email) => tr("an empty email address"),
+        Problem::Empty(Multi::Url) => tr("an empty URL"),
+        Problem::NotPhone(value) => tr!("\"{}\" is not a phone number", value),
+        Problem::NotEmail(value) => tr!("\"{}\" is not an email address", value),
+        Problem::Nameless => tr("A contact needs a name, a company, a phone number or an email."),
+    }
+}
+
+/// The line under the mirroring switch, in the person's language.
+fn mirror_text(line: &mirror::Line) -> String {
+    match line {
+        mirror::Line::SignedOut(who) => tr!("{} is signed out: sign in again for changes to cross", who),
+        mirror::Line::Off => tr("Off"),
+        // What stopped a run, as the library recorded it.
+        mirror::Line::Problem(problem) => problem.clone(),
+        mirror::Line::Waiting(n) => trn!("{n} possible duplicates wait for you", *n),
+        mirror::Line::LastRun(when) => {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs());
+            match now.saturating_sub(*when) {
+                0..60 => tr("On · last mirrored just now"),
+                s @ 60..3600 => trn!("On · last mirrored {n} minutes ago", s / 60),
+                s @ 3600..86_400 => trn!("On · last mirrored {n} hours ago", s / 3600),
+                s => trn!("On · last mirrored {n} days ago", s / 86_400),
+            }
+        }
+        mirror::Line::On => tr("On"),
+    }
+}
+
+/// A stored birthday (`1990-05-01`, or `1604-05-01` without a year) as the person's language writes a date: its own
+/// short date, or the day and the month's name without a year. One that is not a date shows as stored.
+fn birthday_text(stored: &str) -> String {
+    let parts: Vec<i32> = stored.split('-').filter_map(|p| p.parse().ok()).collect();
+    let [year, month, day] = parts[..] else {
+        return model::birthday_display(stored);
+    };
+    match glib::DateTime::from_local(year, month, day, 0, 0, 0.0) {
+        Ok(date) if year == 1604 => i18n::format_day_month(&date),
+        Ok(date) => i18n::format_date(&date),
+        Err(_) => model::birthday_display(stored),
+    }
+}
+
+/// Asks before something that cannot be taken back, as [`omui::confirm`] does with a destructive action (Enter and
+/// Escape cancel), for a heading with a name in it, which `confirm`'s English-in, translated-out text cannot be:
+/// `text` writes the heading, the body and the `confirm` button's label now and after each switch of language.
+fn confirm_destructive(
+    parent: &impl IsA<gtk::Widget>,
+    text: impl Fn(&omui::Dialog) + 'static,
+    yes: impl FnOnce() + 'static,
+) {
+    let dialog = omui::Dialog::new(Some(""), Some(""));
+    dialog.add_response("cancel", "");
+    dialog.add_response("confirm", "");
+    dialog.set_response_translated("cancel", "_Cancel");
+    dialog.bind(text);
+    dialog.set_response_appearance("confirm", omui::Appearance::Destructive);
+    dialog.set_default_response("cancel");
+    dialog.set_close_response("cancel");
+    let yes = Cell::new(Some(yes));
+    dialog.connect_response(move |_, id| {
+        if id == "confirm"
+            && let Some(yes) = yes.take()
+        {
+            yes();
+        }
+    });
+    dialog.present(parent);
 }

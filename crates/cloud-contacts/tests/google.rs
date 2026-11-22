@@ -111,7 +111,9 @@ impl Env {
 
     fn fails(&self, args: &[&str]) -> (i32, Value) {
         let out = self.run(args);
-        let v = envelope(&out.stdout);
+        // A failure leaves stdout to successful output alone: the error object is on stderr.
+        assert_eq!(stdout(&out), "", "{args:?}");
+        let v = envelope(&out.stderr);
         assert_eq!(v["ok"], false, "{args:?}: {v}");
         (code(&out), v["error"].clone())
     }
@@ -150,7 +152,7 @@ fn both_accounts_side_by_side() {
     assert_eq!(ids(&env.json(&["list", "--account", "google", "--cached"])).len(), 2);
     // Two Ann Lees, one per account: the name is ambiguous, the ID is not.
     let (exit, e) = env.fails(&["show", "ann lee", "--cached"]);
-    assert_eq!((exit, e["code"].as_str()), (2, Some("ambiguous")));
+    assert_eq!((exit, e["code"].as_str()), (1, Some("ambiguous")));
     assert!(e["hint"].as_str().unwrap().contains("google:people/c2"), "{e}");
     assert_eq!(
         env.json(&["show", "google:people/c2", "--cached"])["company"],
@@ -179,7 +181,7 @@ fn a_change_goes_to_its_own_account_only() {
     let env = start();
     // With two accounts, a new contact needs to know where it goes.
     let (exit, e) = env.fails(&["add", "--first", "Dee"]);
-    assert_eq!((exit, e["code"].as_str()), (2, Some("usage")));
+    assert_eq!((exit, e["code"].as_str()), (1, Some("usage")));
     let icloud_writes = || {
         env.icloud
             .requests()
@@ -272,15 +274,17 @@ fn a_failing_account_is_a_warning_beside_the_others() {
     );
     // That account alone: its failure is the answer.
     let out = env.run_with(&["list", "--account", "google"], &[("FAKE_GWS_OFFLINE", "1")]);
-    assert_eq!(code(&out), 5);
+    assert_eq!(code(&out), 1);
+    assert_eq!(stdout(&out), "");
+    assert_eq!(envelope(&out.stderr)["error"]["code"], "account_unavailable");
 }
 
 #[test]
-fn signed_out_of_google_is_exit_3_with_its_login() {
+fn signed_out_of_google_fails_with_its_login() {
     let env = start();
     std::fs::remove_file(env.dir.path().join("config/cloud-contacts/gws/google/credentials.enc")).unwrap();
     let (exit, e) = env.fails(&["list", "--account", "google"]);
-    assert_eq!((exit, e["code"].as_str()), (3, Some("account_unauthorized")));
+    assert_eq!((exit, e["code"].as_str()), (1, Some("account_unauthorized")));
     assert_eq!(e["hint"], "run `cloud-contacts account login google`");
     let status = env.json(&["status"]);
     assert_eq!(status["accounts"][0]["name"], "google");
@@ -302,14 +306,14 @@ fn unlinking_google_forgets_its_sign_in_not_its_contacts() {
     let gws = env.dir.path().join("config/cloud-contacts/gws/google");
     assert!(gws.join("credentials.enc").is_file());
     let (exit, _) = env.fails(&["account", "remove", "google"]);
-    assert_eq!(exit, 2, "asks first");
+    assert_eq!(exit, 1, "asks first");
     env.ok(&["account", "remove", "google", "--yes"]);
     assert!(!gws.exists());
     assert_eq!(env.google()["people"].as_object().unwrap().len(), 2);
     assert!(ids(&env.json(&["list"])).iter().all(|i| i.starts_with("icloud:")));
     // A second iCloud account cannot be linked: icloud-session holds one.
     let (exit, e) = env.fails(&["account", "add", "icloud", "--name", "other"]);
-    assert_eq!((exit, e["code"].as_str()), (3, Some("not_configured")));
+    assert_eq!((exit, e["code"].as_str()), (1, Some("not_configured")));
 }
 
 #[test]
@@ -317,7 +321,7 @@ fn mirror_needs_both_accounts() {
     let env = start();
     env.ok(&["account", "remove", "google", "--yes"]);
     let (exit, e) = env.fails(&["mirror"]);
-    assert_eq!((exit, e["code"].as_str()), (3, Some("needs_both_accounts")));
+    assert_eq!((exit, e["code"].as_str()), (1, Some("needs_both_accounts")));
     assert_eq!(e["message"], "mirroring contacts needs an iCloud and a Google account");
     assert_eq!(
         e["hint"],
@@ -368,7 +372,7 @@ fn mirror_on_copies_both_ways_and_holds_doubts() {
     assert_eq!(env.json(&["status"])["mirror"]["on"], false);
     // it asks first
     let (exit, e) = env.fails(&["mirror", "on"]);
-    assert_eq!((exit, e["code"].as_str()), (2, Some("usage")));
+    assert_eq!((exit, e["code"].as_str()), (1, Some("usage")));
     assert!(env.google()["people"].as_object().unwrap().len() == 2, "nothing copied");
 
     let on = env.json(&["mirror", "on", "--yes"]);
@@ -446,7 +450,7 @@ fn duplicates_and_merge() {
     // merge into the iCloud one: iCloud's company stays, Google's goes to the
     // notes, and the Google copy goes
     let (exit, _) = env.fails(&["merge", "icloud:ANN-LEE", "google:people/c2"]);
-    assert_eq!(exit, 2, "asks first");
+    assert_eq!(exit, 1, "asks first");
     let out = env.json(&[
         "merge",
         "google:people/c2",
@@ -527,7 +531,7 @@ fn merge_all_within_an_account_loses_nothing() {
     assert_eq!(nia["confidence"], "check");
 
     let (exit, _) = env.fails(&["merge", "--all"]);
-    assert_eq!(exit, 2, "asks first");
+    assert_eq!(exit, 1, "asks first");
     let out = env.json(&["merge", "--all", "--yes"]);
     let merged = out["merged"].as_array().unwrap();
     assert_eq!(merged.len(), 1, "only the likely group");

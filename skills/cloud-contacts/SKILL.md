@@ -43,7 +43,7 @@ cloud-contacts refresh                         # fetch every account now
 ```
 
 Reads fetch every account first; `--cached` reads the last fetch instead.
-A name in two accounts is ambiguous (exit 2): the hint lists the IDs; use one.
+A name in two accounts fails as `ambiguous`: the hint lists the IDs; use one.
 
 ## Changing
 
@@ -62,7 +62,7 @@ Delete only what the person asked to delete.
 ## Mirroring iCloud and Google
 
 Only for people with both an iCloud and a Google account linked (otherwise
-`mirror` fails with `needs_both_accounts`, exit 3). Off until turned on.
+`mirror` fails with `needs_both_accounts`). Off until turned on.
 
 ```bash
 cloud-contacts mirror               # status: on, linked, last_run, problem, waiting
@@ -89,7 +89,7 @@ groups to the person and merge or keep apart only what they say.
 
 Check `cloud-contacts status` (its `mirror`) or `mirror` when asked whether
 it is on. Turn it on, call pairs, or merge only when the person asks. A run
-stopped at `too_many_deletions` (exit 2) lists what it would delete: show the
+stopped at `too_many_deletions` lists what it would delete: show the
 person, and run `mirror run --yes` only if they confirm. Photos, Google's
 groups and iCloud-only fields never cross.
 
@@ -98,7 +98,9 @@ groups and iCloud-only fields never cross.
 Piped output is a JSON envelope `{ok, data, summary, meta?}`; `--quiet` is
 the data alone, `--ids-only` the IDs, `--count` the number. An account that
 failed while others answered is in `meta.warnings` (the command still
-succeeds). Failures: `{ok:false, error:{code, message, hint?}}`, exit 2
-usage/ambiguous, 3 `not_configured`, `sign_in_required` or
-`account_unauthorized` (the hint says how to sign in), 4 `not_found`,
-5 `account_unavailable`, `network` and the like.
+succeeds). A command exits 0 when it did what it was asked and 1 when it did
+not; stdout then stays empty and the error goes to stderr, as
+`{ok:false, error:{code, message, hint?}}` when piped or with `--json`. Tell
+failures apart by `code`, never the exit status: `usage` or `ambiguous`,
+`not_configured`, `sign_in_required` or `account_unauthorized` (the hint says
+how to sign in), `not_found`, `account_unavailable`, `network` and the like.

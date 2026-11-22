@@ -93,12 +93,16 @@ run() {
 
   # In the background, waited for: bash runs a trap only once the foreground command ends, and `timeout` puts the app
   # in a process group Ctrl-C does not reach. Killing `timeout` stops the app with it.
+  # A `language` command's catalog is named from the repository's root, as a script is; the app runs in the shots
+  # directory, from which omui would read a relative path, so the app is given the whole path.
+  local repo=${here%/dev}
+  sed -e "s|\"catalog\":\"dev/|\"catalog\":\"$repo/dev/|g" "$script" >"$root/script.jsonl"
   local status=0
   (
     cd "$shots"
     exec "${env[@]}" GDK_BACKEND=broadway BROADWAY_DISPLAY=":$display" \
       OMUI_QA=1 OMUI_QA_INPUT="127.0.0.1:$port" OMUI_QA_FD=3 \
-      timeout "${OMUI_QA_TIMEOUT:-120}" "$app" <"$script" 3>"$root/answers"
+      timeout "${OMUI_QA_TIMEOUT:-120}" "$app" <"$root/script.jsonl" 3>"$root/answers"
   ) &
   app_pid=$!
   wait "$app_pid" || status=$?

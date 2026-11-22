@@ -15,9 +15,11 @@ exec bin/arch-run env EXPECTED_VERSION="$version" EXPECTED_ARCH="$arch" \
     bash /tmp/install.sh
     [[ $(pacman -Q cloud-contacts | cut -d" " -f2) == "$EXPECTED_VERSION-1" ]]
     [[ $(cloud-contacts --version) == "cloud-contacts $EXPECTED_VERSION" ]]
+    test -x /usr/lib/cloud-contacts/cloud-contacts-app
     test -x /usr/bin/cloud-contacts-app
-    ldd /usr/bin/cloud-contacts-app > /tmp/gtk-libraries
+    ldd /usr/lib/cloud-contacts/cloud-contacts-app > /tmp/gtk-libraries
     ! grep -q "not found" /tmp/gtk-libraries
-    test -f /usr/share/applications/com.ferdousbhai.cloudcontacts.desktop
+    test -f /usr/share/applications/cloud-contacts.desktop
+    test -f /usr/share/icons/hicolor/scalable/apps/cloud-contacts.svg
     test -f /usr/lib/systemd/user/cloud-contacts-mirror.timer
   '

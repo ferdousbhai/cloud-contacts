@@ -5,6 +5,34 @@
 
 use crate::model::{self, Change, Contact, Field, Multi};
 
+/// What keeps a draft from being saved. The window says it in the person's language; [`std::fmt::Display`] is the
+/// English, as the command line says the same of its options.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Problem {
+    /// The birthday as typed is no date.
+    Birthday(String),
+    /// A phone, email or URL row added empty.
+    Empty(Multi),
+    /// This phone number has no digits.
+    NotPhone(String),
+    /// This email address has no `@`.
+    NotEmail(String),
+    /// Nothing names the contact: no name, company, phone or email.
+    Nameless,
+}
+
+impl std::fmt::Display for Problem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Problem::Birthday(s) => write!(f, "birthday \"{s}\": use YYYY-MM-DD, or MM-DD without a year"),
+            Problem::Empty(m) => write!(f, "an empty {}", m.noun()),
+            Problem::NotPhone(v) => write!(f, "\"{v}\" is not a phone number"),
+            Problem::NotEmail(v) => write!(f, "\"{v}\" is not an email address"),
+            Problem::Nameless => f.write_str("A contact needs a name, a company, a phone number or an email."),
+        }
+    }
+}
+
 /// The dialog's single-line fields, in the order shown (two groups of
 /// three, then the rest).
 pub const SCALARS: &[(Field, &str)] = &[
@@ -86,19 +114,27 @@ impl Draft {
     /// `before` is checked: a value iCloud already holds (a phone with no
     /// digits, typed on another device) does not keep the rest of an edit
     /// from being saved.
-    pub fn problem(&self, before: &Draft) -> Option<String> {
+    pub fn problem(&self, before: &Draft) -> Option<Problem> {
         for c in self.changes(before) {
-            let checked = match c {
-                Change::Set(Field::Birthday, _) => model::parse_birthday(self.scalar(Field::Birthday)).map(drop),
-                Change::Add(m, l) => m.check(&l.value),
-                _ => Ok(()),
+            let problem = match c {
+                Change::Set(Field::Birthday, _) => {
+                    let typed = self.scalar(Field::Birthday).trim();
+                    model::parse_birthday(typed)
+                        .err()
+                        .map(|_| Problem::Birthday(typed.to_owned()))
+                }
+                Change::Add(m, l) => m.check(&l.value).err().map(|_| match m {
+                    _ if l.value.trim().is_empty() => Problem::Empty(m),
+                    Multi::Phone => Problem::NotPhone(l.value.clone()),
+                    _ => Problem::NotEmail(l.value.clone()),
+                }),
+                _ => None,
             };
-            if let Err(e) = checked {
-                return Some(e);
+            if problem.is_some() {
+                return problem;
             }
         }
-        (!before.middle_name && !model::names_someone(&self.changes(&Draft::default())))
-            .then(|| "A contact needs a name, a company, a phone number or an email.".into())
+        (!before.middle_name && !model::names_someone(&self.changes(&Draft::default()))).then_some(Problem::Nameless)
     }
 
     /// The changes from `before` to this draft. A row's text is read back
@@ -257,7 +293,7 @@ mod tests {
         bad.multis[0].1.push(row(None, "HOME", "+1 888"));
         bad.multis[1].1 = vec![row(None, "HOME", "nope")];
         assert_eq!(
-            bad.problem(&before).as_deref(),
+            bad.problem(&before).map(|p| p.to_string()).as_deref(),
             Some("\"nope\" is not an email address")
         );
     }

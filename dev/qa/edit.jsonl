@@ -42,13 +42,19 @@
 {"do":"click","role":"button","name":"Save"}
 {"do":"wait","dialog":null}
 {"do":"wait","role":"list-item","name":"birthday","visible":true}
+# Shown as the language writes a date (the C locale's short date here, as dev/qa.sh runs with LC_ALL=C), not as stored.
+{"do":"wait","role":"label","name":"12/10/1815","visible":true}
+{"do":"wait","role":"label","name":"1815-12-10","visible":false}
 {"do":"shot","path":"edit-saved.png"}
 
-# Edit and Cancel changes nothing.
+# Edit and Cancel changes nothing: what was typed is asked about first (dev/qa/discard.jsonl has the question's
+# other answers), and Discard leaves the contact as it was.
 {"do":"key","keys":"<Control>e"}
 {"do":"wait","dialog":"Edit Contact"}
 {"do":"type","role":"text-box","name":"Nickname","text":"Countess"}
 {"do":"click","role":"button","name":"Cancel"}
+{"do":"wait","dialog":"Discard your changes?"}
+{"do":"click","role":"button","name":"Discard"}
 {"do":"wait","dialog":null}
 {"do":"wait","role":"label","name":"Countess","visible":false}
 

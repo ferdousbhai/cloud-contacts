@@ -1,0 +1,52 @@
+# A switch of language while the window is open rewrites what it shows, live: the labels and tooltips bound to their
+# English (the search's placeholder, a banner's button, an icon button's name), and what the window wrote from its state
+# (the duplicates banner's count, the card's lines and labels, the list's empty state, the sidebar's menu). The
+# stand-in Danish is dev/qa/da.json, which omui's QA `language` command registers and switches to as Omarchy would.
+{"do":"wait","role":"list-item","name":"Bob Berg, iCloud","visible":true}
+{"do":"wait","role":"label","name":"2 contacts look like duplicates of each other.","visible":true}
+{"do":"type","role":"search-box","name":"Search (Ctrl+F)","text":"0199"}
+{"do":"key","keys":"Return"}
+{"do":"wait","role":"label","name":"In iCloud","visible":true}
+{"do":"wait","role":"list-item","name":"mobile","visible":true}
+
+# A dialog open at the switch follows it too: its heading, its buttons and the line that holds Save back.
+{"do":"key","keys":"<Control>e"}
+{"do":"wait","dialog":"Edit Contact"}
+{"do":"type","role":"text-box","name":"Birthday (1990-05-01, or 05-01)","text":"x"}
+{"do":"wait","role":"label","name":"birthday \"x\": use YYYY-MM-DD, or MM-DD without a year","visible":true}
+{"do":"language","code":"da","catalog":"dev/qa/da.json"}
+{"do":"wait","dialog":"Rediger kontakt"}
+{"do":"wait","role":"button","name":"Annuller","visible":true}
+{"do":"wait","role":"label","name":"fødselsdag \"x\": skriv ÅÅÅÅ-MM-DD, eller MM-DD uden år","visible":true}
+{"do":"click","role":"button","name":"Annuller"}
+{"do":"wait","dialog":"Kassér dine ændringer?"}
+{"do":"wait","role":"button","name":"Kassér","visible":true}
+{"do":"click","role":"button","name":"Kassér"}
+{"do":"wait","dialog":null}
+{"do":"wait","role":"search-box","name":"Søg (Ctrl+F)","visible":true}
+{"do":"wait","role":"button","name":"Ny kontakt (Ctrl+N)","visible":true}
+{"do":"wait","role":"button","name":"Ikke nu","visible":true}
+{"do":"wait","role":"label","name":"2 kontakter ligner dubletter af hinanden.","visible":true}
+{"do":"wait","role":"label","name":"I iCloud","visible":true}
+{"do":"wait","role":"list-item","name":"mobil","visible":true}
+{"do":"wait","role":"label","name":"Spejl kontakter mellem iCloud og Google","visible":true}
+# A string the stand-in has not translated stays English.
+{"do":"wait","role":"button","name":"Turn On…","visible":true}
+{"do":"shot","path":"language-da.png"}
+
+# The overlay opens in the language of the moment.
+{"do":"key","keys":"F1"}
+{"do":"wait","dialog":"Tastaturgenveje"}
+{"do":"wait","role":"label","name":"Rediger den valgte kontakt","visible":true}
+{"do":"key","keys":"Escape"}
+{"do":"wait","dialog":null}
+
+# A search that finds nobody says so in the new language, and back in English everything is as it was.
+{"do":"type","role":"search-box","name":"Søg (Ctrl+F)","text":"Zelda"}
+{"do":"wait","role":"label","name":"Ingen resultater","visible":true}
+{"do":"wait","role":"label","name":"Ingen kontakt valgt","visible":true}
+{"do":"language","code":"en"}
+{"do":"wait","role":"label","name":"No Results","visible":true}
+{"do":"wait","role":"search-box","name":"Search (Ctrl+F)","visible":true}
+{"do":"wait","role":"label","name":"2 contacts look like duplicates of each other.","visible":true}
+{"do":"quit"}

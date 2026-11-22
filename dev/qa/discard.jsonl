@@ -1,0 +1,60 @@
+# The add and edit dialog never loses typed work unasked: Cancel, Escape and closing the window ask first, and only
+# Discard loses it. Bob Berg is edited here, and is left as he was. dev/qa/undo.jsonl has the dialog with no work in it.
+{"do":"wait","role":"list-item","name":"Bob Berg, iCloud","visible":true}
+{"do":"select","role":"list-item","name":"Bob Berg, iCloud"}
+{"do":"wait","role":"label","name":"+47 555 01 234","visible":true}
+
+# With a nickname typed, Cancel asks before it is lost. Escape on the question loses nothing: the dialog is back
+# with what was typed. Escape there asks again, and so does Keep Editing's answer.
+{"do":"key","keys":"<Control>e"}
+{"do":"wait","dialog":"Edit Contact"}
+{"do":"type","role":"text-box","name":"Nickname","text":"Bobby"}
+{"do":"click","role":"button","name":"Cancel"}
+{"do":"wait","dialog":"Discard your changes?"}
+{"do":"wait","focus":{"role":"button","name":"Keep Editing"}}
+{"do":"shot","path":"discard-question.png"}
+{"do":"key","keys":"Escape"}
+{"do":"wait","dialog":"Edit Contact"}
+{"do":"wait","role":"text-box","name":"Nickname","text":"Bobby"}
+{"do":"key","keys":"Escape"}
+{"do":"wait","dialog":"Discard your changes?"}
+{"do":"click","role":"button","name":"Keep Editing"}
+{"do":"wait","dialog":"Edit Contact"}
+{"do":"wait","role":"text-box","name":"Nickname","text":"Bobby"}
+
+# Closing the window over the dialog, as the compositor can, asks too, and Enter keeps the window and the work.
+{"do":"action","name":"window.close"}
+{"do":"wait","dialog":"Discard your changes?"}
+{"do":"key","keys":"Return"}
+{"do":"wait","dialog":"Edit Contact"}
+{"do":"wait","role":"text-box","name":"Nickname","text":"Bobby"}
+
+# Discard is the one answer that loses it: the contact is as it was.
+{"do":"click","role":"button","name":"Cancel"}
+{"do":"wait","dialog":"Discard your changes?"}
+{"do":"click","role":"button","name":"Discard"}
+{"do":"wait","dialog":null}
+{"do":"wait","role":"label","name":"Bobby","visible":false}
+{"do":"wait","role":"label","name":"+47 555 01 234","visible":true}
+
+# A new contact's typed name is work too: Escape asks, and Keep Editing brings back the name and the account chosen.
+{"do":"key","keys":"<Control>n"}
+{"do":"wait","dialog":"New Contact"}
+{"do":"click","role":"combo-box","name":"Account"}
+{"do":"wait","focus":{"role":"list-item","name":"Google"}}
+{"do":"key","keys":"Down"}
+{"do":"key","keys":"Return"}
+{"do":"wait","focus":{"role":"combo-box","name":"Account"}}
+{"do":"type","role":"text-box","name":"First name","text":"Grace"}
+{"do":"key","keys":"Escape"}
+{"do":"wait","dialog":"Discard your changes?"}
+{"do":"click","role":"button","name":"Keep Editing"}
+{"do":"wait","dialog":"New Contact"}
+{"do":"wait","role":"text-box","name":"First name","text":"Grace"}
+{"do":"wait","role":"combo-box","name":"Account","text":"iCloud"}
+{"do":"click","role":"button","name":"Cancel"}
+{"do":"wait","dialog":"Discard your changes?"}
+{"do":"click","role":"button","name":"Discard"}
+{"do":"wait","dialog":null}
+{"do":"wait","role":"list-item","name":"Grace, iCloud","visible":false}
+{"do":"quit"}
