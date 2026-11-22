@@ -42,7 +42,7 @@
 {"do":"click","role":"button","name":"Save"}
 {"do":"wait","dialog":null}
 {"do":"wait","role":"list-item","name":"birthday","visible":true}
-# Shown as the language writes a date (the C locale's short date here, as dev/qa.sh runs with LC_ALL=C), not as stored.
+# Shown as the language writes a date (English's short date, by the system's en_US.UTF-8), not as stored.
 {"do":"wait","role":"label","name":"12/10/1815","visible":true}
 {"do":"wait","role":"label","name":"1815-12-10","visible":false}
 {"do":"shot","path":"edit-saved.png"}

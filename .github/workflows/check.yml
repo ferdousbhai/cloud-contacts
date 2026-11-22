@@ -35,6 +35,12 @@ jobs:
           key: check-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
             check-
+      # The container generates no locale, where a desktop has at least English's: omui writes English's dates and
+      # numbers by en_US.UTF-8, and without it falls back to the C locale's (a two-digit year in a short date).
+      - name: Generate English's locale
+        run: |
+          sed -i 's/^#en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen
+          locale-gen
       # As a regular user: root writes where permissions forbid it, which the test of an export into a
       # directory it cannot write would pass over, and bin/check fails rather than skip it.
       - name: bin/check
