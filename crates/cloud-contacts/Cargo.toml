@@ -12,12 +12,13 @@ default-run = "cloud-contacts"
 name = "cloud_contacts"
 
 # The command line. It never calls into GTK, so it links without GTK and
-# starts fast; with no command it runs cloud-contacts-app.
+# starts fast; `cloud-contacts open` (or no command) runs cloud-contacts-app.
 [[bin]]
 name = "cloud-contacts"
 path = "src/main.rs"
 
-# The window (and, given a command, the command line too). Its code is in
+# The window (and, given a command, the command line too), installed under
+# /usr/lib/cloud-contacts/. Its code is in
 # the binary, so none of it can reach the library the command line links.
 [[bin]]
 name = "cloud-contacts-app"

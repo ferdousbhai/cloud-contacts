@@ -145,6 +145,54 @@ pub fn write_private(path: &Path, contents: &[u8]) -> std::io::Result<()> {
     std::fs::rename(&tmp, path)
 }
 
+/// Writes a file the person asked for (an export) in one step: a temporary file beside it, synced to disk, then
+/// renamed over it, so that a write that fails or is cut short leaves the file that was there as it was. A directory
+/// that cannot hold the temporary file fails the write; the file is never truncated and rewritten in place instead.
+///
+/// The file keeps the permissions it had, and a new one gets what the umask gives any new file: it is the person's
+/// own, not this app's private data. A link is followed, so the file it points to is the one replaced, and what is
+/// no regular file (`/dev/stdout`, a pipe) is written straight to, as nothing of it can be lost.
+pub fn write_replacing(path: &Path, contents: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let target = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned());
+    let existing = std::fs::metadata(&target).ok();
+    if existing.as_ref().is_some_and(|m| !m.is_file()) {
+        return std::fs::OpenOptions::new()
+            .write(true)
+            .open(&target)?
+            .write_all(contents);
+    }
+    let dir = match target.parent() {
+        Some(dir) if !dir.as_os_str().is_empty() => dir,
+        _ => Path::new("."),
+    };
+    let name = target
+        .file_name()
+        .ok_or_else(|| std::io::Error::other("not a file name"))?;
+    // Hidden, and named for this process: two exports to one file at once each write their own.
+    let mut tmp_name = std::ffi::OsString::from(".");
+    tmp_name.push(name);
+    tmp_name.push(format!(".tmp-{}", std::process::id()));
+    let tmp = dir.join(tmp_name);
+    let written = (|| {
+        let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp)?;
+        if let Some(existing) = &existing {
+            file.set_permissions(existing.permissions())?;
+        }
+        file.write_all(contents)?;
+        // On disk before the rename: a power cut then leaves the old file or the whole new one, not an empty one.
+        file.sync_all()?;
+        std::fs::rename(&tmp, &target)
+    })();
+    if written.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+        return written;
+    }
+    // The rename itself is in the directory; a file system that cannot sync one has still renamed.
+    let _ = std::fs::File::open(dir).and_then(|d| d.sync_all());
+    Ok(())
+}
+
 /// Whether icloud-session is signed in (asked only on a first run).
 pub type SignedIn = fn() -> bool;
 

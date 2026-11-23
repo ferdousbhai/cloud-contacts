@@ -4,14 +4,16 @@
 //! ([`icloud_session::output`]): text on a terminal, the JSON envelope when
 //! piped, `--json`/`--styled`/`--quiet`/`--ids-only`/`--count` to choose.
 //!
-//! Exit codes: 0 ok; 1 error; 2 usage, an ambiguous name, or `delete`
-//! without `--yes` when nobody can be asked; 3 not signed in (iCloud's
-//! `sign_in_required`/`session_rejected`, Google's `account_unauthorized`),
-//! or no account linked (`not_configured`); 4 not found; 5 an account out of
-//! reach (offline, `icloud-sessiond` or `gws` missing or failing, the
-//! keyring locked, a server error). The JSON `code` tells them apart. An
-//! account that fails while others answer is a warning (`meta.warnings`, and
-//! `warning:` lines on stderr in text mode), not an error.
+//! Exit codes are Omarchy's: 0 when the command did what it was asked, 1 when
+//! it did not, whatever the reason. Errors go to stderr, never stdout: as
+//! `error:`/`hint:` lines in text mode, and as the contract's error object
+//! `{ok: false, error: {code, message, hint?}}` in every machine mode, so
+//! stdout carries only a successful command's output. The JSON `code` is what
+//! tells failures apart and stays stable: `usage`, `ambiguous`, `not_found`,
+//! `not_configured`, `sign_in_required`, `account_unauthorized`,
+//! `account_unavailable` and the rest. An account that fails while others
+//! answer is a warning (`meta.warnings`, and `warning:` lines on stderr in
+//! text mode), not an error.
 
 use std::io::{self, IsTerminal, Write};
 use std::path::PathBuf;
@@ -19,7 +21,7 @@ use std::sync::Arc;
 
 use clap::{Parser, Subcommand};
 use icloud_app::cli::{confirm, no_data_dir, other, session_failure, usage, warn, warning};
-use icloud_session::cli::{EXIT_ERROR, EXIT_NOT_FOUND, EXIT_SIGN_IN, EXIT_UNAVAILABLE, EXIT_USAGE};
+use icloud_session::cli::EXIT_ERROR;
 use icloud_session::output::{self, CliError, Mode, OutputFlags, Response};
 use serde_json::{Value, json};
 
@@ -55,26 +57,20 @@ Output: human-readable text on a terminal, a JSON envelope
 accounts that failed). --json forces the envelope, --styled text, --quiet
 prints only the data, --ids-only the contact ids, --count the number of
 results. Flags combine: ids-only > count > quiet > json > styled. A failure
-is {\"ok\":false,\"error\":{\"code\",\"message\",\"hint\"?}} on stdout, or
-error:/hint: lines on stderr in text mode.
+goes to stderr, never stdout: {\"ok\":false,\"error\":{\"code\",\"message\",\"hint\"?}}
+in a machine mode, error:/hint: lines in text mode.
 
-Exit codes:
-  0 ok
-  1 error (cancelled, error, bad_request, http 4xx)
-  2 usage, ambiguous, or delete without --yes when nobody can be asked
-  3 not_configured (no account linked), sign_in_required or
-    session_rejected (iCloud: icloud-session sign-in), account_unauthorized
-    (Google: cloud-contacts account login NAME)
-  4 not_found
-  5 offline, network, session_service (icloud-sessiond unreachable),
-    keyring_unavailable, bad_response, account_unavailable (gws missing or
-    Google unreachable), http 5xx";
+Exit codes: 0 when the command did what it was asked, 1 when it did not. The
+error's code says why: usage, ambiguous, not_found, not_configured (no
+account linked), sign_in_required or session_rejected (iCloud: icloud-session
+sign-in), account_unauthorized (Google: cloud-contacts account login NAME),
+account_unavailable, offline, network, cancelled, and the like.";
 
 #[derive(Parser)]
 #[command(
     name = "cloud-contacts",
     version,
-    about = "Your iCloud and Google contacts from the command line. With no command, opens the app.",
+    about = "Your iCloud and Google contacts from the command line. `cloud-contacts open` (or no command) opens the window.",
     after_help = AFTER_HELP
 )]
 struct Args {
@@ -125,6 +121,11 @@ struct Fields {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Open the Contacts window (the same as no command at all).
+    ///
+    /// The command-line binary runs the window's binary in its place before
+    /// these arguments are read; only options given with it end up here.
+    Open,
     /// The linked accounts and whether each is signed in (no network).
     ///
     /// JSON: {accounts: [{name, provider, label, signed_in, detail}]}
@@ -265,7 +266,7 @@ enum Command {
     /// Recovery brings an earlier address book back); Google keeps deleted
     /// contacts in its Trash for 30 days. Asks in text mode on a terminal
     /// (stdin and stdout); anywhere else --yes is required (a usage error,
-    /// exit 2, otherwise).
+    /// exit 1, otherwise).
     ///
     /// JSON: {action: "delete", contact: {id, name}}
     #[command(after_help = AFTER_HELP)]
@@ -412,13 +413,13 @@ pub fn failure(e: &Error) -> Failure {
     match e {
         Error::Session(e) => session_failure(e),
         Error::Google { account, kind, message } => match kind {
-            Kind::Auth => CliError::new("account_unauthorized", EXIT_SIGN_IN, message.clone())
+            Kind::Auth => CliError::new("account_unauthorized", EXIT_ERROR, message.clone())
                 .hint(format!("run `cloud-contacts account login {account}`")),
-            Kind::Unavailable => CliError::new("account_unavailable", EXIT_UNAVAILABLE, message.clone()),
-            Kind::NotFound => CliError::new("not_found", EXIT_NOT_FOUND, message.clone()),
+            Kind::Unavailable => CliError::new("account_unavailable", EXIT_ERROR, message.clone()),
+            Kind::NotFound => CliError::new("not_found", EXIT_ERROR, message.clone()),
             Kind::BadRequest | Kind::Conflict => CliError::new("bad_request", EXIT_ERROR, message.clone()),
         },
-        Error::Config(m) => CliError::new("not_configured", EXIT_SIGN_IN, m.clone())
+        Error::Config(m) => CliError::new("not_configured", EXIT_ERROR, m.clone())
             .hint("link one with `cloud-contacts account add icloud` or `cloud-contacts account add google`"),
         e @ (Error::Refused { .. } | Error::Other(_)) => other(e.to_string()),
     }
@@ -440,9 +441,25 @@ fn contacts(n: usize) -> String {
 
 /// Runs the command line on the process arguments and returns the exit code.
 pub fn run() -> u8 {
-    let args = match output::parse::<Args>() {
+    let args = match Args::try_parse() {
         Ok(args) => args,
-        Err(code) => return code,
+        // --help and --version are not failures.
+        Err(e) if !e.use_stderr() => {
+            let _ = e.print();
+            return EXIT_OK;
+        }
+        Err(e) => {
+            let mode = output::argv_mode();
+            if !mode.is_machine() {
+                // clap's own message, on stderr, for a person.
+                let _ = e.print();
+                return EXIT_FAILED;
+            }
+            return report(
+                &usage(output::usage_message(&e)).hint(output::usage_hint("cloud-contacts")),
+                mode,
+            );
+        }
     };
     let mode = args.out.mode();
     if let Some(home) = agent_skill::home() {
@@ -455,6 +472,9 @@ pub fn run() -> u8 {
     let result = (|| {
         if let Command::Skill { action: Some(action) } = args.command {
             return skill(action);
+        }
+        if let Command::Open = args.command {
+            return Err(usage("`open` takes no options").hint("run `cloud-contacts open` alone"));
         }
         let root = args.data_dir.or_else(Store::default_root).ok_or_else(no_data_dir)?;
         let (config, note) = config::first_run(config::icloud_signed_in)?;
@@ -478,9 +498,57 @@ pub fn run() -> u8 {
         })
     })();
     match result {
-        Ok(resp) => resp.print(mode),
-        Err(e) => e.report(mode),
+        Ok(resp) => {
+            resp.print(mode);
+            EXIT_OK
+        }
+        Err(e) => report(&e, mode),
     }
+}
+
+/// A command that did what it was asked.
+pub const EXIT_OK: u8 = 0;
+/// A command that did not, for any reason: the error's `code` says which.
+pub const EXIT_FAILED: u8 = 1;
+
+/// The error object, its keys in the contract's order.
+#[derive(serde::Serialize)]
+struct ErrorEnvelope<'a> {
+    ok: bool,
+    error: ErrorBody<'a>,
+}
+
+#[derive(serde::Serialize)]
+struct ErrorBody<'a> {
+    code: &'a str,
+    message: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    hint: Option<&'a str>,
+}
+
+/// Writes a failure to stderr and returns the exit code, which is always 1. The shared contract
+/// (`CliError::report`) puts a machine's error object on stdout with an exit code of its own per kind; Omarchy's
+/// apps keep stdout for what succeeded and exit 1 on any failure, so a script piping the output never reads an error
+/// as data, and the kind is the object's `code` alone.
+fn report(e: &CliError, mode: Mode) -> u8 {
+    if mode.is_machine() {
+        let envelope = ErrorEnvelope {
+            ok: false,
+            error: ErrorBody {
+                code: &e.code,
+                message: &e.message,
+                hint: e.hint.as_deref(),
+            },
+        };
+        eprintln!("{}", output::pretty(&envelope));
+    } else {
+        let mut text = format!("error: {}", e.message);
+        if let Some(hint) = &e.hint {
+            text.push_str(&format!("\nhint: {hint}"));
+        }
+        eprintln!("{}", output::terminal_safe(&text));
+    }
+    EXIT_FAILED
 }
 
 fn skill(action: SkillAction) -> Outcome {
@@ -572,7 +640,7 @@ impl Cli {
                 contacts, keep, yes, ..
             } => self.merge(&contacts, keep.as_deref(), yes),
             Command::Account { action } => self.account(action),
-            Command::Skill { .. } => unreachable!("handled before the accounts open"),
+            Command::Skill { .. } | Command::Open => unreachable!("handled before the accounts open"),
         }
     }
 
@@ -750,7 +818,9 @@ impl Cli {
         let ids: Vec<String> = chosen.iter().map(|e| e.id()).collect();
         let resp = match output {
             Some(path) => {
-                std::fs::write(&path, &text).map_err(|e| other(format!("cannot write {}: {e}", path.display())))?;
+                // In one step: a write that fails leaves a file already there whole.
+                config::write_replacing(&path, text.as_bytes())
+                    .map_err(|e| other(format!("cannot write {}: {e}", path.display())))?;
                 Response::new(
                     json!({ "action": "export", "count": count, "file": path }),
                     format!("Wrote {} to {}", contacts(count), path.display()),
@@ -821,14 +891,14 @@ impl Cli {
             mirror::Pairing::Ready(i, g) => Ok((i, g)),
             mirror::Pairing::Missing(p) => Err(CliError::new(
                 "needs_both_accounts",
-                EXIT_SIGN_IN,
+                EXIT_ERROR,
                 "mirroring contacts needs an iCloud and a Google account",
             )
             .hint(format!(
                 "link the {} one with `cloud-contacts account add {p}`",
                 crate::book::label(p)
             ))),
-            mirror::Pairing::Ambiguous(m) => Err(CliError::new("ambiguous", EXIT_USAGE, m)
+            mirror::Pairing::Ambiguous(m) => Err(CliError::new("ambiguous", EXIT_ERROR, m)
                 .hint("unlink the Google accounts you don't want mirrored with iCloud")),
         }
     }
@@ -900,7 +970,7 @@ impl Cli {
             }
             Some(MirrorAction::Run { yes }) => {
                 if !mirror::load(root)?.on {
-                    return Err(CliError::new("off", EXIT_USAGE, "mirroring iCloud and Google is off")
+                    return Err(CliError::new("off", EXIT_ERROR, "mirroring iCloud and Google is off")
                         .hint("turn it on with `cloud-contacts mirror on`"));
                 }
                 match engine.run(yes) {
@@ -911,14 +981,10 @@ impl Cli {
                         );
                         status(Some(json!({ "report": report })), summary)
                     }
+                    // An account out of reach stopped the run before it changed anything: a failure, which the
+                    // timer's service shows as one.
                     Err(e @ mirror::RunError::Account(..)) => {
-                        let msg = e.to_string();
-                        if self.mode == Mode::Human {
-                            warning(&msg);
-                        }
-                        Ok(status(Some(json!({ "report": null })), msg.clone())?
-                            .meta("warnings", [msg])
-                            .exit(EXIT_UNAVAILABLE))
+                        Err(CliError::new("account_unavailable", EXIT_ERROR, e.to_string()))
                     }
                     Err(e) => Err(run_failure(e)),
                 }
@@ -1234,8 +1300,8 @@ fn with_warnings(resp: Response, shown: &Shown, mode: Mode) -> Response {
 
 /// Mirroring's state in a line.
 fn mirror_line(st: &mirror::State) -> String {
-    match mirror::shown(&[("icloud".into(), true), ("google".into(), true)], st, ago) {
-        mirror::Shown::Switch { line, .. } => line,
+    match mirror::shown(&[("icloud".into(), true), ("google".into(), true)], st) {
+        mirror::Shown::Switch { line, .. } => line.english(ago),
         mirror::Shown::Nothing => String::new(),
     }
 }
@@ -1268,7 +1334,7 @@ pub fn ago(t: u64) -> String {
 /// A run's failure as the contract's error.
 fn run_failure(e: mirror::RunError) -> Failure {
     match e {
-        mirror::RunError::TooManyDeletions(list) => CliError::new("too_many_deletions", EXIT_USAGE, {
+        mirror::RunError::TooManyDeletions(list) => CliError::new("too_many_deletions", EXIT_ERROR, {
             let names: Vec<String> = list.iter().take(20).map(|d| d.name.clone()).collect();
             format!(
                 "this run would delete {} contacts ({}{}); nothing changed",
@@ -1378,7 +1444,7 @@ fn resolve<'c>(shown: &'c Shown, query: &str) -> Result<&'c Entry, Failure> {
     }
     if q.eq_ignore_ascii_case("me") {
         return shown.entries.iter().find(|e| e.me).ok_or_else(|| {
-            CliError::new("not_found", EXIT_NOT_FOUND, "no \"me\" card in the linked accounts")
+            CliError::new("not_found", EXIT_ERROR, "no \"me\" card in the linked accounts")
                 .hint("set My Card on an Apple device")
         });
     }
@@ -1405,12 +1471,12 @@ fn resolve<'c>(shown: &'c Shown, query: &str) -> Result<&'c Entry, Failure> {
     match matches.as_slice() {
         [e] => Ok(e),
         [] => Err(
-            CliError::new("not_found", EXIT_NOT_FOUND, format!("no contact matches \"{query}\""))
+            CliError::new("not_found", EXIT_ERROR, format!("no contact matches \"{query}\""))
                 .hint("`cloud-contacts list QUERY` searches names, companies, emails and phone numbers"),
         ),
         many => Err(CliError::new(
             "ambiguous",
-            EXIT_USAGE,
+            EXIT_ERROR,
             format!("\"{query}\" matches {} contacts", many.len()),
         )
         .hint(format!(
@@ -1559,6 +1625,7 @@ mod tests {
         Args::command().debug_assert();
     }
 
+    /// The codes and hints are the shared ones, and every failure carries exit 1: the code tells them apart.
     #[test]
     fn failures_use_the_shared_codes_exits_and_hints() {
         use icloud_session::Error as S;
@@ -1567,12 +1634,12 @@ mod tests {
             (f.code, f.exit)
         };
         // icloud-session's failures read as in every iCloud tool.
-        assert_eq!(code(S::Network("x".into()).into()), ("network".into(), 5));
+        assert_eq!(code(S::Network("x".into()).into()), ("network".into(), 1));
         let rejected = Failure::from(Error::from(S::Http {
             status: 421,
             body: String::new(),
         }));
-        assert_eq!((rejected.code.as_str(), rejected.exit), ("session_rejected", 3));
+        assert_eq!((rejected.code.as_str(), rejected.exit), ("session_rejected", 1));
         assert_eq!(rejected.hint, Some(icloud_app::cli::sign_in_hint()));
         // Contacts' own.
         let refused = Error::Refused {
@@ -1587,13 +1654,13 @@ mod tests {
             kind,
             message: "x".into(),
         };
-        assert_eq!(code(google(Kind::Auth)), ("account_unauthorized".into(), 3));
+        assert_eq!(code(google(Kind::Auth)), ("account_unauthorized".into(), 1));
         assert_eq!(
             Failure::from(google(Kind::Auth)).hint.as_deref(),
             Some("run `cloud-contacts account login work`")
         );
-        assert_eq!(code(google(Kind::Unavailable)), ("account_unavailable".into(), 5));
-        assert_eq!(code(google(Kind::NotFound)), ("not_found".into(), 4));
-        assert_eq!(code(Error::Config("x".into())), ("not_configured".into(), 3));
+        assert_eq!(code(google(Kind::Unavailable)), ("account_unavailable".into(), 1));
+        assert_eq!(code(google(Kind::NotFound)), ("not_found".into(), 1));
+        assert_eq!(code(Error::Config("x".into())), ("not_configured".into(), 1));
     }
 }

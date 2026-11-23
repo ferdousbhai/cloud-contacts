@@ -44,11 +44,14 @@ package() {
   cd "$(_srcdir)"
   local data=crates/cloud-contacts/data
   install -Dm755 "${CARGO_TARGET_DIR:-target}/release/cloud-contacts" "$pkgdir/usr/bin/cloud-contacts"
-  install -Dm755 "${CARGO_TARGET_DIR:-target}/release/cloud-contacts-app" "$pkgdir/usr/bin/cloud-contacts-app"
-  install -Dm644 "$data/com.ferdousbhai.cloudcontacts.desktop" \
-    "$pkgdir/usr/share/applications/com.ferdousbhai.cloudcontacts.desktop"
-  install -Dm644 "$data/com.ferdousbhai.cloudcontacts.svg" \
-    "$pkgdir/usr/share/icons/hicolor/scalable/apps/com.ferdousbhai.cloudcontacts.svg"
+  # The window, off PATH: `cloud-contacts open` runs it. One name for the command, the desktop entry, the icon and
+  # the window's class.
+  install -Dm755 "${CARGO_TARGET_DIR:-target}/release/cloud-contacts-app" "$pkgdir/usr/lib/cloud-contacts/cloud-contacts-app"
+  # The window's command before 0.4.4, on PATH still for key bindings and notification actions: it runs
+  # `cloud-contacts open`.
+  install -Dm755 packaging/cloud-contacts-app "$pkgdir/usr/bin/cloud-contacts-app"
+  install -Dm644 "$data/cloud-contacts.desktop" "$pkgdir/usr/share/applications/cloud-contacts.desktop"
+  install -Dm644 "$data/cloud-contacts.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/cloud-contacts.svg"
   install -Dm644 -t "$pkgdir/usr/lib/systemd/user" \
     packaging/systemd/cloud-contacts-mirror.service packaging/systemd/cloud-contacts-mirror.timer
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"

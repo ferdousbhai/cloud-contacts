@@ -1,0 +1,12 @@
+# The picture at the top of README.md: the window on the stand-in accounts, whose contacts are all made up, with Ann
+# Lee's card open. To take it again after the window changes:
+#   CLOUD_CONTACTS_QA_SHOTS=docs/screenshots dev/qa.sh target/debug/cloud-contacts-app dev/qa/screenshot.jsonl
+{"do":"wait","role":"list-item","name":"Bob Berg, iCloud","visible":true}
+{"do":"wait","role":"list-item","name":"Ann Lee, Google Ann Co · Google","visible":true}
+{"do":"wait","role":"button","name":"Turn On…","visible":true}
+{"do":"wait","role":"label","name":"2 contacts look like duplicates of each other.","visible":true}
+{"do":"select","role":"list-item","name":"Ann Lee, Acme · iCloud"}
+{"do":"wait","role":"label","name":"ann@acme.example","visible":true}
+{"do":"wait","role":"label","name":"+1 555 010 0199","visible":true}
+{"do":"shot","path":"contacts.png"}
+{"do":"quit"}

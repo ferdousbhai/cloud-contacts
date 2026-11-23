@@ -1076,35 +1076,63 @@ pub enum Shown {
     /// Not both kinds of account linked: no mention at all.
     Nothing,
     /// The switch, and under it this line; `offer`: the banner too.
-    Switch { on: bool, line: String, offer: bool },
+    Switch { on: bool, line: Line, offer: bool },
+}
+
+/// The line under the switch, as what it says rather than as words: the window says it in the person's language
+/// and the command line in English ([`Line::english`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Line {
+    /// This account ("iCloud", "Google") is signed out.
+    SignedOut(&'static str),
+    Off,
+    /// What stopped the last run, as it was recorded.
+    Problem(String),
+    /// This many possible duplicates wait for the person.
+    Waiting(usize),
+    /// On, and last mirrored at this time (seconds since the epoch).
+    LastRun(u64),
+    On,
+}
+
+impl Line {
+    /// The line in English, `ago` saying how long ago a time was.
+    pub fn english(&self, ago: impl Fn(u64) -> String) -> String {
+        match self {
+            Line::SignedOut(who) => format!("{who} is signed out: sign in again for changes to cross"),
+            Line::Off => "Off".to_string(),
+            Line::Problem(p) => p.clone(),
+            Line::Waiting(1) => "1 possible duplicate waits for you".to_string(),
+            Line::Waiting(n) => format!("{n} possible duplicates wait for you"),
+            Line::LastRun(t) => format!("On · last mirrored {}", ago(*t)),
+            Line::On => "On".to_string(),
+        }
+    }
 }
 
 /// `accounts`: each linked account's provider and whether it is signed in.
-pub fn shown(accounts: &[(String, bool)], s: &State, ago: impl Fn(u64) -> String) -> Shown {
+pub fn shown(accounts: &[(String, bool)], s: &State) -> Shown {
     let has = |p: &str| accounts.iter().any(|(q, _)| q == p);
     if !has("icloud") || !has("google") {
         return Shown::Nothing;
     }
-    let signed_out: Vec<&str> = accounts
+    let signed_out: Vec<&'static str> = accounts
         .iter()
         .filter(|(_, ok)| !ok)
         .map(|(p, _)| if p == "icloud" { "iCloud" } else { "Google" })
         .collect();
     let line = if let Some(who) = signed_out.first() {
-        format!("{who} is signed out: sign in again for changes to cross")
+        Line::SignedOut(who)
     } else if !s.on {
-        "Off".to_string()
+        Line::Off
     } else if let Some(p) = &s.problem {
-        p.clone()
+        Line::Problem(p.clone())
     } else if !s.waiting.is_empty() {
-        match s.waiting.len() {
-            1 => "1 possible duplicate waits for you".to_string(),
-            n => format!("{n} possible duplicates wait for you"),
-        }
+        Line::Waiting(s.waiting.len())
     } else {
         match s.last_run {
-            Some(t) => format!("On · last mirrored {}", ago(t)),
-            None => "On".to_string(),
+            Some(t) => Line::LastRun(t),
+            None => Line::On,
         }
     };
     Shown::Switch {
@@ -1258,14 +1286,18 @@ mod tests {
     fn what_the_window_shows() {
         let s = State::default();
         let ago = |_| "now".to_string();
+        let line = |shown: Shown| match shown {
+            Shown::Switch { line, .. } => line.english(ago),
+            Shown::Nothing => String::new(),
+        };
         let one = [("icloud".to_string(), true)];
-        assert_eq!(shown(&one, &s, ago), Shown::Nothing);
+        assert_eq!(shown(&one, &s), Shown::Nothing);
         let both = [("icloud".to_string(), true), ("google".to_string(), true)];
         assert_eq!(
-            shown(&both, &s, ago),
+            shown(&both, &s),
             Shown::Switch {
                 on: false,
-                line: "Off".into(),
+                line: Line::Off,
                 offer: true
             }
         );
@@ -1273,16 +1305,13 @@ mod tests {
             offer_declined: true,
             ..State::default()
         };
-        assert!(matches!(
-            shown(&both, &declined, ago),
-            Shown::Switch { offer: false, .. }
-        ));
+        assert!(matches!(shown(&both, &declined), Shown::Switch { offer: false, .. }));
         let out = [("icloud".to_string(), true), ("google".to_string(), false)];
         assert_eq!(
-            shown(&out, &s, ago),
+            shown(&out, &s),
             Shown::Switch {
                 on: false,
-                line: "Google is signed out: sign in again for changes to cross".into(),
+                line: Line::SignedOut("Google"),
                 offer: false
             }
         );
@@ -1292,12 +1321,17 @@ mod tests {
             ..State::default()
         };
         assert_eq!(
-            shown(&both, &on, ago),
+            shown(&both, &on),
             Shown::Switch {
                 on: true,
-                line: "On · last mirrored now".into(),
+                line: Line::LastRun(1),
                 offer: false
             }
         );
+        assert_eq!(
+            line(shown(&out, &s)),
+            "Google is signed out: sign in again for changes to cross"
+        );
+        assert_eq!(line(shown(&both, &on)), "On · last mirrored now");
     }
 }

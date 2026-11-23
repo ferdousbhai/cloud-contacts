@@ -1,0 +1,31 @@
+# Work is what saving would change, not whether a key was pressed: a dialog with nothing typed, or with what was
+# typed undone, closes without a question. dev/qa/discard.jsonl has the question.
+{"do":"wait","role":"list-item","name":"Bob Berg, iCloud","visible":true}
+{"do":"select","role":"list-item","name":"Bob Berg, iCloud"}
+{"do":"wait","role":"label","name":"+47 555 01 234","visible":true}
+
+# Edit with nothing typed: Cancel closes at once, and so does Escape.
+{"do":"key","keys":"<Control>e"}
+{"do":"wait","dialog":"Edit Contact"}
+{"do":"click","role":"button","name":"Cancel"}
+{"do":"wait","dialog":null}
+{"do":"key","keys":"<Control>e"}
+{"do":"wait","dialog":"Edit Contact"}
+{"do":"key","keys":"Escape"}
+{"do":"wait","dialog":null}
+
+# Ctrl+Z takes back what was typed in a field and Ctrl+Shift+Z brings it back. Typed and undone, the contact is as
+# it was loaded, so Escape closes with nothing to ask about.
+{"do":"key","keys":"<Control>e"}
+{"do":"wait","dialog":"Edit Contact"}
+{"do":"type","role":"text-box","name":"Nickname","text":"Bobby"}
+{"do":"wait","role":"text-box","name":"Nickname","text":"Bobby"}
+{"do":"key","keys":"<Control>z"}
+{"do":"wait","role":"text-box","name":"Nickname","text":""}
+{"do":"key","keys":"<Control>Z"}
+{"do":"wait","role":"text-box","name":"Nickname","text":"Bobby"}
+{"do":"key","keys":"<Control>z"}
+{"do":"wait","role":"text-box","name":"Nickname","text":""}
+{"do":"key","keys":"Escape"}
+{"do":"wait","dialog":null}
+{"do":"quit"}

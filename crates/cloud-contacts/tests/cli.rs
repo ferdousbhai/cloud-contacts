@@ -78,7 +78,9 @@ impl Env {
     /// A failing run: its exit code and the error object of the envelope.
     fn fails(&self, args: &[&str]) -> (i32, Value) {
         let out = self.run(args);
-        let v = envelope(&out.stdout);
+        // A failure leaves stdout to successful output alone: the error object is on stderr.
+        assert_eq!(stdout(&out), "", "{args:?}");
+        let v = envelope(&out.stderr);
         assert_eq!(v["ok"], false, "{args:?}: {v}");
         (code(&out), v["error"].clone())
     }
@@ -163,41 +165,47 @@ fn shows_a_contact_by_name_phone_email_or_me() {
 fn not_found_and_ambiguous() {
     let env = start();
     let (exit, e) = env.fails(&["show", "zed"]);
-    assert_eq!((exit, e["code"].as_str()), (4, Some("not_found")));
+    assert_eq!((exit, e["code"].as_str()), (1, Some("not_found")));
     assert!(e["hint"].as_str().unwrap().contains("cloud-contacts list"), "{e}");
     // "a" is in several names: the hint lists them with their IDs.
     let (exit, e) = env.fails(&["show", "a", "--cached"]);
-    assert_eq!((exit, e["code"].as_str()), (2, Some("ambiguous")));
+    assert_eq!((exit, e["code"].as_str()), (1, Some("ambiguous")));
     let hint = e["hint"].as_str().unwrap();
     assert!(
         hint.contains("Ann Lee  (icloud:ANN-LEE)") && hint.contains("(icloud:ACME-CO)"),
         "{hint}"
     );
     // The same for a command that changes something, and nothing was sent.
-    assert_eq!(env.error(&["edit", "zed", "--last", "Z", "--cached"]).0, 4);
-    assert_eq!(env.error(&["delete", "a", "--yes", "--cached"]).0, 2);
+    assert_eq!(env.error(&["edit", "zed", "--last", "Z", "--cached"]).0, 1);
+    assert_eq!(env.error(&["delete", "a", "--yes", "--cached"]).0, 1);
     assert!(env.writes().is_empty());
 }
 
-/// In text mode a failure is `error:`/`hint:` lines on stderr and nothing on
-/// stdout; in every machine mode it is the error object on stdout.
+/// A failure exits 1 and leaves stdout empty, whatever its kind: in text mode it is `error:`/`hint:` lines on
+/// stderr, and in every machine mode the error object on stderr, its `code` the kind.
 #[test]
-fn errors_go_to_stderr_as_text_and_to_stdout_as_json() {
+fn errors_go_to_stderr_as_text_or_json_and_exit_1() {
     let env = start();
     let out = env.run(&["show", "zed", "--styled"]);
-    assert_eq!((code(&out), stdout(&out).as_str()), (4, ""));
+    assert_eq!((code(&out), stdout(&out).as_str()), (1, ""));
     let err = stderr(&out);
     assert!(err.starts_with("error: no contact matches \"zed\"\nhint: "), "{err}");
     for flag in ["--json", "--quiet", "--ids-only", "--count"] {
         let out = env.run(&["show", "zed", "--cached", flag]);
-        let v = envelope(&out.stdout);
-        assert_eq!((code(&out), v["ok"].as_bool()), (4, Some(false)), "{flag}");
+        let v = envelope(&out.stderr);
+        assert_eq!((code(&out), v["ok"].as_bool()), (1, Some(false)), "{flag}");
         assert_eq!(v["error"]["code"], "not_found", "{flag}");
-        assert_eq!(stderr(&out), "", "{flag}");
+        assert_eq!(stdout(&out), "", "{flag}");
+    }
+    // --help and --version are no failures, and need no display.
+    for flag in ["--help", "--version"] {
+        let out = env.run(&[flag]);
+        assert_eq!(code(&out), 0, "{flag}: {}", stderr(&out));
+        assert!(stdout(&out).contains("cloud-contacts"), "{flag}");
     }
     // A usage error clap finds reads the same way.
     let (exit, e) = env.fails(&["list", "--no-such-flag"]);
-    assert_eq!((exit, e["code"].as_str()), (2, Some("usage")));
+    assert_eq!((exit, e["code"].as_str()), (1, Some("usage")));
     assert_eq!(e["hint"], "run `cloud-contacts --help`");
 }
 
@@ -292,8 +300,8 @@ fn add_finds_its_card_by_id_in_a_changeset_of_others() {
 #[test]
 fn add_needs_a_name_phone_or_email() {
     let env = start();
-    assert_eq!(env.error(&["add", "--notes", "who?"]), (2, "usage".into()));
-    assert_eq!(env.error(&["add", "--phone", "call me"]), (2, "usage".into()));
+    assert_eq!(env.error(&["add", "--notes", "who?"]), (1, "usage".into()));
+    assert_eq!(env.error(&["add", "--phone", "call me"]), (1, "usage".into()));
     assert!(env.writes().is_empty());
     let company = env.json(&["add", "--company", "Globex", "--is-company"]);
     assert_eq!(
@@ -348,7 +356,7 @@ fn edit_changes_only_what_it_names() {
         e["message"].as_str().unwrap().contains("has no phone number 999 999"),
         "{e}"
     );
-    assert_eq!(env.error(&["edit", "ann", "--cached"]), (2, "usage".into()));
+    assert_eq!(env.error(&["edit", "ann", "--cached"]), (1, "usage".into()));
 }
 
 #[test]
@@ -440,10 +448,10 @@ fn delete_asks_or_needs_yes() {
     let env = start();
     // Piped: nobody can be asked, in a machine mode or as text.
     let (exit, e) = env.fails(&["delete", "bob"]);
-    assert_eq!((exit, e["code"].as_str()), (2, Some("usage")));
+    assert_eq!((exit, e["code"].as_str()), (1, Some("usage")));
     assert_eq!(e["hint"], "pass --yes to delete without asking");
     let out = env.run(&["delete", "bob", "--styled"]);
-    assert_eq!(code(&out), 2);
+    assert_eq!(code(&out), 1);
     assert!(
         stderr(&out).starts_with("error: delete asks before it acts"),
         "{}",
@@ -458,7 +466,7 @@ fn delete_asks_or_needs_yes() {
     );
     assert!(env.state.card("BOB-BERG").is_none());
     assert_eq!(env.state.count(), 3);
-    assert_eq!(env.error(&["show", "bob", "--cached"]), (4, "not_found".into()));
+    assert_eq!(env.error(&["show", "bob", "--cached"]), (1, "not_found".into()));
 }
 
 #[test]
@@ -491,19 +499,89 @@ fn exports_vcards() {
     );
 }
 
+/// `export -o` replaces a file in one step: the temporary file beside it is renamed over it, the file keeps its
+/// permissions, a link still points to the file it did, and nothing is left behind.
 #[test]
-fn signed_out_is_exit_3() {
+fn an_export_replaces_its_file_in_one_step() {
+    use std::os::unix::fs::PermissionsExt;
+    let env = start();
+    let dir = env.dir.path().join("out");
+    std::fs::create_dir(&dir).unwrap();
+    let file = dir.join("contacts.vcf");
+    std::fs::write(&file, "an older export").unwrap();
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o640)).unwrap();
+    let link = dir.join("link.vcf");
+    std::os::unix::fs::symlink("contacts.vcf", &link).unwrap();
+
+    env.json(&["export", "bob", "-o", link.to_str().unwrap()]);
+    let written = std::fs::read_to_string(&file).unwrap();
+    assert!(
+        written.starts_with("BEGIN:VCARD\r\n") && written.contains("FN:Bob Berg\r\n"),
+        "{written}"
+    );
+    assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o640);
+    assert!(std::fs::symlink_metadata(&link).unwrap().is_symlink());
+    let mut left: Vec<_> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .collect();
+    left.sort();
+    assert_eq!(left, ["contacts.vcf", "link.vcf"]);
+
+    // A new file in the directory the command is run in, named without one.
+    let out = command(env!("CARGO_BIN_EXE_cloud-contacts"), &env.base, env.dir.path())
+        .env("XDG_CONFIG_HOME", env.dir.path().join("config"))
+        .env("FAKE_CONTACTS_QUIET", "1")
+        .current_dir(&dir)
+        .args(["export", "ann", "--cached", "-o", "ann.vcf"])
+        .output()
+        .unwrap();
+    assert_eq!(code(&out), 0, "{}", stderr(&out));
+    assert!(
+        std::fs::read_to_string(dir.join("ann.vcf"))
+            .unwrap()
+            .contains("FN:Ann Lee\r\n")
+    );
+}
+
+/// A directory that cannot hold the temporary file fails the export, and the file that was there is whole: it is
+/// not truncated and rewritten in place, which the file's own permissions would allow.
+#[test]
+fn an_export_that_cannot_be_written_leaves_the_file_as_it_was() {
+    use std::os::unix::fs::PermissionsExt;
+    let env = start();
+    let dir = env.dir.path().join("read-only");
+    std::fs::create_dir(&dir).unwrap();
+    let file = dir.join("contacts.vcf");
+    std::fs::write(&file, "an older export").unwrap();
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+    // Root writes where permissions forbid it, and the test would prove nothing: it fails rather than pass so.
+    assert!(
+        std::fs::write(dir.join("probe"), "").is_err(),
+        "this test needs a user that permissions hold back: run the tests as a regular user, not as root"
+    );
+
+    let (status, error) = env.fails(&["export", "-o", file.to_str().unwrap()]);
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert_eq!(status, 1, "{error}");
+    assert!(error["message"].as_str().unwrap().contains("cannot write"), "{error}");
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "an older export");
+    assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+}
+
+#[test]
+fn signed_out_fails_with_its_sign_in_hint() {
     let env = start();
     env.ok(&["refresh"]);
     *env.state.signed_out.lock().unwrap() = true;
     for args in [&["list"][..], &["show", "ann"], &["export"], &["refresh"]] {
         let (exit, e) = env.fails(args);
-        assert_eq!((exit, e["code"].as_str()), (3, Some("sign_in_required")), "{args:?}");
+        assert_eq!((exit, e["code"].as_str()), (1, Some("sign_in_required")), "{args:?}");
         let hint = e["hint"].as_str().unwrap();
         assert!(hint.starts_with("run `icloud-session sign-in`"), "{hint}");
     }
     let out = env.run(&["list", "--styled"]);
-    assert_eq!((code(&out), stdout(&out).as_str()), (3, ""));
+    assert_eq!((code(&out), stdout(&out).as_str()), (1, ""));
     assert!(
         stderr(&out).starts_with("error: sign in to iCloud required"),
         "{}",
@@ -556,7 +634,7 @@ fn the_first_run_links_icloud_and_says_so_once() {
     // Unlinked, it stays unlinked.
     env.ok(&["account", "remove", "icloud", "--yes"]);
     let (exit, e) = env.fails(&["list"]);
-    assert_eq!((exit, e["code"].as_str()), (3, Some("not_configured")));
+    assert_eq!((exit, e["code"].as_str()), (1, Some("not_configured")));
 }
 
 /// `cloud-contacts` is what agents and scripts run: it must not load GTK.
@@ -572,7 +650,168 @@ fn the_command_line_binary_does_not_link_gtk() {
     );
 }
 
+/// README.md's Keyboard table has every accelerator the window sets, so a shortcut added there is one a reader
+/// can find.
 #[test]
-fn no_command_runs_the_app_beside_it() {
+fn the_readme_lists_every_shortcut() {
+    let main = include_str!("../src/bin/app/main.rs");
+    let readme = include_str!("../../../README.md");
+    let table = readme
+        .split_once("## Keyboard\n")
+        .and_then(|(_, rest)| rest.split_once("\n## "))
+        .expect("README.md has a Keyboard section")
+        .0;
+    let mut keys = Vec::new();
+    for line in main.lines().filter(|l| l.contains("set_accels_for_action(")) {
+        // The quoted strings after the action's name: `"<Ctrl>r", "F5"`.
+        for accel in line.split('"').skip(3).step_by(2) {
+            let key = match accel.strip_prefix("<Ctrl>") {
+                Some(letter) => format!("Ctrl+{}", letter.to_uppercase()),
+                None => accel.to_owned(),
+            };
+            assert!(
+                table.lines().any(|row| row.starts_with('|') && row.contains(&key)),
+                "{key} ({accel}) is missing from README.md's Keyboard table"
+            );
+            keys.push(key);
+        }
+    }
+    assert_eq!(keys, ["Ctrl+R", "F5", "Ctrl+N", "Ctrl+F", "Ctrl+E"]);
+    // The window's own keys (omui's quit keys and shortcut overlay), and what the dialog's fields take from GTK,
+    // which dev/qa/undo.jsonl presses. The overlay lists the same keys as the table.
+    let window = include_str!("../src/bin/app/window.rs");
+    for row in [
+        "Ctrl+W, Ctrl+Q",
+        "F1, Ctrl+?",
+        "Ctrl+Z, Ctrl+Shift+Z",
+        "Ctrl+R, F5",
+        "Escape, Alt+Left",
+        "Up, Down",
+    ] {
+        assert!(
+            table.contains(&format!("| {row} |")),
+            "{row} is missing from README.md's Keyboard table"
+        );
+        // The overlay has the row's keys on one row too, given to `ShortcutSection::alternatives`.
+        let keys: Vec<String> = row.split(", ").map(|key| format!("\"{key}\"")).collect();
+        assert!(
+            window.contains(&format!("&[{}]", keys.join(", "))),
+            "{row} is missing from the shortcut overlay"
+        );
+    }
+    for key in ["Ctrl+N", "Ctrl+E", "Ctrl+F", "Enter", "Alt+S", "Alt+C"] {
+        assert!(
+            window.contains(&format!("(\"{key}\", ")),
+            "{key} is missing from the shortcut overlay"
+        );
+    }
+    assert!(
+        window.contains("omui::quit_keys(&self.window)")
+            && window.contains("self.shortcuts.install(&self.window, true)")
+    );
+}
+
+/// `cloud-contacts open`, and no command at all, run the window's binary in their place: in `../lib/cloud-contacts/`
+/// from the command line where the package puts it, off `PATH`, and beside it in a build tree. The package's
+/// `cloud-contacts-app` on `PATH`, the old command, runs `cloud-contacts open`. Without the window's binary it says so
+/// and exits 1.
+#[test]
+fn open_runs_the_window_beside_it_or_in_lib() {
+    // The shared check: with no command, the app beside the binary, then the message without it.
     assert_no_command_runs_the_app(env!("CARGO_BIN_EXE_cloud-contacts"), "cloud-contacts");
+
+    let tmp = tempfile::tempdir().unwrap();
+    let (bin, lib) = (tmp.path().join("usr/bin"), tmp.path().join("usr/lib/cloud-contacts"));
+    std::fs::create_dir_all(&bin).unwrap();
+    std::fs::create_dir_all(&lib).unwrap();
+    let cli = bin.join("cloud-contacts");
+    std::fs::copy(env!("CARGO_BIN_EXE_cloud-contacts"), &cli).unwrap();
+    let marker = tmp.path().join("ran");
+    icloud_app::testing::write_script(
+        &lib.join("cloud-contacts-app"),
+        &format!("#!/bin/sh\necho \"$#\" > '{}'\nexit 0\n", marker.display()),
+    );
+    // The old command, beside the installed one as the package puts it, runs `cloud-contacts open`, which runs the
+    // window in lib (not the launcher again).
+    let launcher = bin.join("cloud-contacts-app");
+    std::fs::copy(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packaging/cloud-contacts-app"),
+        &launcher,
+    )
+    .unwrap();
+    for (program, args) in [(&cli, &["open"][..]), (&cli, &[]), (&launcher, &[])] {
+        let _ = std::fs::remove_file(&marker);
+        // A test thread forking while the copy was open for writing holds it busy for a moment.
+        let out = (0..50)
+            .find_map(|_| {
+                match std::process::Command::new(program)
+                    .args(args)
+                    .env("PATH", tmp.path().join("nowhere"))
+                    .stdin(std::process::Stdio::null())
+                    .output()
+                {
+                    Err(e) if e.kind() == std::io::ErrorKind::ExecutableFileBusy => {
+                        std::thread::sleep(std::time::Duration::from_millis(20));
+                        None
+                    }
+                    r => Some(r.unwrap()),
+                }
+            })
+            .unwrap();
+        assert_eq!(code(&out), 0, "{args:?}: {}", stderr(&out));
+        // The window is given no arguments: with none, its binary opens the window rather than run a command.
+        assert_eq!(std::fs::read_to_string(&marker).unwrap().trim(), "0", "{args:?}");
+    }
+    // `open` with options is a usage error, not a window.
+    let env = start();
+    let (exit, e) = env.fails(&["open", "--cached"]);
+    assert_eq!((exit, e["code"].as_str()), (1, Some("usage")));
+}
+
+/// One name, `cloud-contacts`, for the command, the package, the desktop entry, the icon and the window's class; the
+/// window's binary is off `PATH`, under /usr/lib/cloud-contacts/, and the desktop entry opens it through the command.
+/// The application's D-Bus name stays the one 0.4 had, `com.ferdousbhai.cloudcontacts` (GLib takes no name without
+/// a dot), so an upgrade loses nothing keyed by it: a window from before the upgrade is the one a launch after it
+/// presents.
+#[test]
+fn the_app_has_one_name() {
+    let data = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("data");
+    let mut files: Vec<String> = std::fs::read_dir(&data)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .collect();
+    files.sort();
+    assert_eq!(files, ["cloud-contacts.desktop", "cloud-contacts.svg"]);
+    let desktop = std::fs::read_to_string(data.join("cloud-contacts.desktop")).unwrap();
+    for line in [
+        "Exec=cloud-contacts open",
+        "Icon=cloud-contacts",
+        "StartupWMClass=cloud-contacts",
+    ] {
+        assert!(
+            desktop.lines().any(|l| l == line),
+            "{line} is missing from the desktop entry"
+        );
+    }
+    let recipe = include_str!("../../../packaging/aur/cloud-contacts/PKGBUILD");
+    for path in [
+        "\"$pkgdir/usr/bin/cloud-contacts\"",
+        "\"$pkgdir/usr/lib/cloud-contacts/cloud-contacts-app\"",
+        "\"$pkgdir/usr/share/applications/cloud-contacts.desktop\"",
+        "\"$pkgdir/usr/share/icons/hicolor/scalable/apps/cloud-contacts.svg\"",
+    ] {
+        assert!(recipe.contains(path), "the PKGBUILD does not install {path}");
+    }
+    // The window's binary is off PATH; the old command on it is the launcher, which runs `cloud-contacts open`.
+    assert!(
+        recipe.contains("install -Dm755 packaging/cloud-contacts-app \"$pkgdir/usr/bin/cloud-contacts-app\""),
+        "the PKGBUILD does not install the old command's launcher"
+    );
+    let main = include_str!("../src/bin/app/main.rs");
+    assert!(main.contains(r#"pub const NAME: &str = "cloud-contacts";"#));
+    assert!(main.contains(r#"pub const APP_ID: &str = "com.ferdousbhai.cloudcontacts";"#));
+    // omui makes NAME the app id of every window added to the app.
+    assert!(main.contains("omui::application(APP_ID, NAME, "));
+    let window = include_str!("../src/bin/app/window.rs");
+    assert!(window.contains(".icon_name(super::NAME)"));
 }

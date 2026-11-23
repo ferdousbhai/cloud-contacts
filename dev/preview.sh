@@ -259,6 +259,13 @@ shoot() {
   kill -0 "$app_pid" 2>/dev/null || { echo "preview: the app exited" >&2; sed -n '1,40p' "$root/app.log" >&2; exit 1; }
   # A picture of an output the window is not on would be blank, and look like a result.
   on_output || { echo "preview: the app's window is not on the output being captured" >&2; hyprctl clients >&2; exit 1; }
+  # Every window of the app, its dialogs too, is of the class `cloud-contacts`, the app's one name, which Hyprland's
+  # window rules match; GTK alone would name it by the D-Bus name.
+  if hyprctl clients -j | jq -e 'any(.[]; .mapped and .class != "cloud-contacts")' >/dev/null; then
+    echo "preview: a window's class is not cloud-contacts:" >&2
+    hyprctl clients -j | jq -r '.[] | .class' >&2
+    exit 1
+  fi
   # Hyprland's own notices (it says it was started without its wrapper) would cover the header.
   hyprctl dismissnotify >/dev/null
   /usr/bin/grim -o preview "$picture"

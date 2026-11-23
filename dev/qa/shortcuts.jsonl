@@ -1,0 +1,26 @@
+# Every shortcut is listed in an overlay. The search has the keyboard as the window opens, where `?` is a character,
+# so the overlay is on F1 and Ctrl+?, and the key that opened it closes it, as Escape does.
+{"do":"wait","role":"list-item","name":"Bob Berg, iCloud","visible":true}
+{"do":"wait","focus":{"role":"search-box","name":"Search (Ctrl+F)"}}
+{"do":"key","keys":"F1"}
+{"do":"wait","dialog":"Keyboard shortcuts"}
+{"do":"wait","role":"label","name":"New contact","visible":true}
+{"do":"wait","role":"label","name":"The contact above or below in the list","visible":true}
+# Keys that do the same share a row, each on its own cap.
+{"do":"wait","role":"label","name":"F5","visible":true}
+{"do":"wait","role":"label","name":"Left","visible":true}
+{"do":"wait","role":"label","name":"Edit the chosen contact","visible":true}
+{"do":"shot","path":"shortcuts.png"}
+{"do":"key","keys":"F1"}
+{"do":"wait","dialog":null}
+{"do":"key","keys":"<Control>question"}
+{"do":"wait","dialog":"Keyboard shortcuts"}
+{"do":"key","keys":"Escape"}
+{"do":"wait","dialog":null}
+
+# In the search `?` is typed, not a shortcut.
+{"do":"type","role":"search-box","name":"Search (Ctrl+F)","text":"?"}
+{"do":"wait","dialog":null}
+{"do":"wait","role":"search-box","name":"Search (Ctrl+F)","text":"?"}
+{"do":"key","keys":"BackSpace"}
+{"do":"quit"}

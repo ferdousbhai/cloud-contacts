@@ -1,0 +1,8 @@
+#!/bin/sh
+# Through 0.4.4 the window was the command `cloud-contacts-app`; it is `cloud-contacts open` now, and the window's own
+# binary lives off PATH in /usr/lib/cloud-contacts/. This keeps the old command, so key bindings, scripts and
+# notification actions that run it still open the window. Given a command, the old binary ran the command line, and
+# so does this.
+[ "$#" -gt 0 ] || set -- open
+# Beside this script, by its own path, so it needs nothing else on PATH.
+exec "${0%/*}/cloud-contacts" "$@"
