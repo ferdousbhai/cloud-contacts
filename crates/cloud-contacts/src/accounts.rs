@@ -86,8 +86,17 @@ fn sign_in(name: &str, cfg: &AccountConfig, root: &Path) -> Result<String> {
                 .unwrap_or_default();
             Ok(format!("signed in to iCloud as {who}"))
         }
+        // The sign-in Cloudmail or Cloud Calendar has on this computer when there is one, else the
+        // browser. An account whose own sign-in works always gets the browser: that is how to change
+        // to another Google account.
         "google" => {
-            google(name, cfg, root).login()?;
+            let google = google(name, cfg, root);
+            if !google.works()
+                && let Some((address, app)) = google.adopt()
+            {
+                return Ok(format!("signed in to Google as {address}, with {app}'s sign-in"));
+            }
+            google.login()?;
             Ok("signed in to Google".into())
         }
         other => Err(Error::Config(format!("unknown provider {other}"))),

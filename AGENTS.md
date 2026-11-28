@@ -21,7 +21,12 @@ One crate, `crates/cloud-contacts`:
 - `src/google.rs` — Google through `gws` (People API), isolated in
   `~/.config/cloud-contacts/gws/<account>`; a person is read into iCloud's card shape with
   Google's record kept under `googlePerson`, and written back on top of it (`card_of`,
-  `person_of`), so what this app does not show survives an edit.
+  `person_of`), so what this app does not show survives an edit. One Google sign-in serves
+  Cloudmail, Cloud Calendar and Cloud Contacts: they share the OAuth client, the browser sign-in
+  asks for all three apps' scopes (`SIGN_IN_SCOPES`, the same list in each app; a scope added to
+  one is added to all three), and an account that isn't signed in first copies a working sign-in
+  from the other two apps' gws directories (`Google::adopt`, from `accounts::sign_in`). It is a
+  copy, never a shared directory.
 - `src/model.rs` (the card and `Change`s), `src/draft.rs` (the edit dialog), `src/vcard.rs`,
   `src/store.rs` (one cache per account under `~/.local/share/cloud-contacts/<account>/`).
 - `src/config.rs` — `~/.config/cloud-contacts/config.toml` and the first run (Cloud Contacts

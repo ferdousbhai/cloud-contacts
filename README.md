@@ -47,6 +47,16 @@ The window's accounts menu does the same. iCloud needs `icloud-session` (from
 directory, `~/.config/cloud-contacts/gws/<account>`, apart from any gws setup of yours. Unlinking
 an account forgets it on this computer; its contacts stay in the account.
 
+One Google sign-in serves [Cloudmail](https://github.com/ferdousbhai/cloud-mail),
+[Cloud Calendar](https://github.com/ferdousbhai/cloud-calendar) and Cloud Contacts. When one of
+the other two is already signed in to Google on this computer, `account add google` uses that
+sign-in and opens no browser, and says which address it took. Otherwise the browser sign-in asks
+for what the three apps use (your mail and its filters, your events and calendar list, your
+contacts), so the other two won't ask again; Cloud Contacts itself touches your contacts only.
+The sign-in it took is a copy in its own directory, so unlinking in one app leaves the others
+signed in. To use another Google account than the one it took, run
+`cloud-contacts account login google`: an account that is signed in always gets the browser.
+
 ## Everyday use
 
 - **Browse and search**: every contact, sorted by last name, each labelled with its account. The

@@ -316,6 +316,79 @@ fn unlinking_google_forgets_its_sign_in_not_its_contacts() {
     assert_eq!((exit, e["code"].as_str()), (1, Some("not_configured")));
 }
 
+/// A Google sign-in as fake-gws keeps one, in another Cloud app's directory.
+fn sibling_sign_in(env: &Env, app_account: &str, status: Value) {
+    let dir = env.dir.path().join("config").join(app_account);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(".encryption_key"), "key").unwrap();
+    std::fs::write(dir.join("credentials.enc"), status.to_string()).unwrap();
+}
+
+#[test]
+fn google_takes_over_another_cloud_apps_sign_in() {
+    let env = start();
+    let logins = || {
+        let path = format!("{}.logins", gws_state(env.dir.path()).display());
+        std::fs::read_to_string(path).unwrap_or_default()
+    };
+    assert!(
+        ["auth/gmail.modify", "auth/calendar.events", "auth/contacts"]
+            .iter()
+            .all(|s| logins().contains(s)),
+        "the browser sign-in asks for what the three apps use: {}",
+        logins()
+    );
+    env.ok(&["account", "remove", "google", "--yes"]);
+    let contacts = "https://www.googleapis.com/auth/contacts";
+    let sam = json!({"token_valid": true, "user": "Sam@Gmail.com", "scopes": ["openid", contacts]});
+    sibling_sign_in(&env, "cloud-calendar/gws/google", sam.clone());
+    // One Google no longer takes, and one without the contacts permission: neither counts.
+    sibling_sign_in(&env, "cloudmail/gws/gmail", json!({"token_valid": false}));
+    sibling_sign_in(
+        &env,
+        "cloudmail/gws/work",
+        json!({"token_valid": true, "user": "other@gmail.com", "scopes": ["https://www.googleapis.com/auth/gmail.modify"]}),
+    );
+
+    let added = env.json(&["account", "add", "google"]);
+    assert_eq!(
+        added["note"],
+        "signed in to Google as sam@gmail.com, with Cloud Calendar's sign-in"
+    );
+    assert_eq!(logins().lines().count(), 1, "no browser sign-in");
+    let own = env.dir.path().join("config/cloud-contacts/gws/google");
+    assert_eq!(
+        std::fs::read_to_string(own.join("credentials.enc")).unwrap(),
+        sam.to_string()
+    );
+    assert_eq!(ids(&env.json(&["list", "--account", "google"])).len(), 2);
+
+    // That address is linked here now, so a second account signs in in the browser.
+    env.ok(&["account", "add", "google", "--name", "work"]);
+    assert_eq!(logins().lines().count(), 2);
+    // Signing in again to an account whose sign-in works is a browser sign-in: the way to another address.
+    env.ok(&["account", "login", "google"]);
+    assert_eq!(logins().lines().count(), 3);
+    // Unlinking removes the copy only.
+    env.ok(&["account", "remove", "google", "--yes"]);
+    assert!(
+        env.dir
+            .path()
+            .join("config/cloud-calendar/gws/google/credentials.enc")
+            .is_file()
+    );
+
+    // Two addresses that could be taken over: the browser asks which.
+    sibling_sign_in(
+        &env,
+        "cloudmail/gws/gmail",
+        json!({"token_valid": true, "user": "third@gmail.com", "scopes": [contacts]}),
+    );
+    let added = env.json(&["account", "add", "google"]);
+    assert_eq!(added["note"], "signed in to Google");
+    assert_eq!(logins().lines().count(), 4);
+}
+
 #[test]
 fn mirror_needs_both_accounts() {
     let env = start();
