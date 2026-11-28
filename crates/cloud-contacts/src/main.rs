@@ -21,7 +21,8 @@ fn main() {
     std::process::exit(cloud_contacts::cli::run().into());
 }
 
-/// Where the window's binary is, of the places it can be; the first is named when none is there.
+/// Where the window's binary is, of the places it can be; the first is named when none is there. Only places beside
+/// this binary: a copy of it somewhere else (a build tree, a test's) never runs the window a package installed.
 fn app_binary() -> PathBuf {
     let exe = std::env::current_exe().ok();
     let candidates: Vec<PathBuf> = exe
@@ -35,13 +36,13 @@ fn app_binary() -> PathBuf {
                 dir.join("cloud-contacts-app"),
             ]
         })
-        .chain([PathBuf::from("/usr/lib/cloud-contacts/cloud-contacts-app")])
         .collect();
     candidates
         .iter()
         .find(|p| p.is_file())
-        .unwrap_or(&candidates[0])
-        .clone()
+        .or(candidates.first())
+        .cloned()
+        .unwrap_or_else(|| PathBuf::from("cloud-contacts-app"))
 }
 
 /// Runs the window in this process's place, so the launcher and the compositor see the one process; returns only
