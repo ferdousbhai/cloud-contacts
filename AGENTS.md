@@ -26,7 +26,10 @@ One crate, `crates/cloud-contacts`:
   asks for all three apps' scopes (`SIGN_IN_SCOPES`, the same list in each app; a scope added to
   one is added to all three), and an account that isn't signed in first copies a working sign-in
   from the other two apps' gws directories (`Google::adopt`, from `accounts::sign_in`). It is a
-  copy, never a shared directory.
+  copy, never a shared directory. Several Google accounts are accounts of their own names
+  (`--name`; the window uses `accounts::next_name`); each keeps its address in
+  `gws/<name>/address`, a new one takes over an address not linked here yet, one signed in again
+  only its own, and `add` refuses an address another account has.
 - `src/model.rs` (the card and `Change`s), `src/draft.rs` (the edit dialog), `src/vcard.rs`,
   `src/store.rs` (one cache per account under `~/.local/share/cloud-contacts/<account>/`).
 - `src/config.rs` — `~/.config/cloud-contacts/config.toml` and the first run (Cloud Contacts

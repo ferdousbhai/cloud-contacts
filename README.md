@@ -57,6 +57,14 @@ The sign-in it took is a copy in its own directory, so unlinking in one app leav
 signed in. To use another Google account than the one it took, run
 `cloud-contacts account login google`: an account that is signed in always gets the browser.
 
+Several Google accounts work side by side, each under a name of its own:
+`cloud-contacts account add google --name work` (its IDs start with `work:`), or "Add Google
+Account…" in the window again, which names them `google`, `google-2`, … A new account takes over
+the sign-in of an address Cloudmail or Cloud Calendar has and Cloud Contacts doesn't yet, one
+address at a time; with none left, the browser opens for you to choose the account. The same
+address can't be linked twice, and `cloud-contacts status` shows which address each account is.
+Mirroring pairs iCloud with one Google account, so it waits while two are linked.
+
 ## Everyday use
 
 - **Browse and search**: every contact, sorted by last name, each labelled with its account. The

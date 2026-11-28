@@ -76,7 +76,9 @@ fn google(name: &str, cfg: &AccountConfig, root: &Path) -> Google {
     Google::new(name, cfg, Store::new(root.join(name)))
 }
 
-fn sign_in(name: &str, cfg: &AccountConfig, root: &Path) -> Result<String> {
+/// `adding`: a new account, which must not be of a Google address another
+/// account here has.
+fn sign_in(name: &str, cfg: &AccountConfig, root: &Path, adding: bool) -> Result<String> {
     match cfg.provider(name) {
         "icloud" => {
             icloud_sign_in()?;
@@ -97,10 +99,30 @@ fn sign_in(name: &str, cfg: &AccountConfig, root: &Path) -> Result<String> {
                 return Ok(format!("signed in to Google as {address}, with {app}'s sign-in"));
             }
             google.login()?;
-            Ok("signed in to Google".into())
+            let Some(address) = google.address() else {
+                return Ok("signed in to Google".into());
+            };
+            if adding && let Some((_, other)) = google.others().into_iter().find(|(linked, _)| *linked == address) {
+                let _ = google.forget();
+                return Err(Error::Config(format!(
+                    "{address} is already linked here as {other}: choose another Google account in the browser"
+                )));
+            }
+            Ok(format!("signed in to Google as {address}"))
         }
         other => Err(Error::Config(format!("unknown provider {other}"))),
     }
+}
+
+/// The name another account of `provider` gets when none is asked for: the
+/// provider's while it is free, then `google-2`, `google-3`, … The window's
+/// "Add Google Account…" links one more Google account each time.
+pub fn next_name(provider: &str) -> Result<String> {
+    let config = config::load()?;
+    Ok(std::iter::once(provider.to_string())
+        .chain((2..).map(|n| format!("{provider}-{n}")))
+        .find(|name| !config.accounts.contains_key(name))
+        .unwrap_or_default())
 }
 
 /// Links an account of `provider` ("icloud" or "google") and signs in to
@@ -121,7 +143,9 @@ pub fn add(name: Option<&str>, provider: &str, root: &Path) -> Result<(String, S
     // the sign-in can take minutes, and accounts may be linked meanwhile.
     let free = |config: &Config| {
         if config.accounts.contains_key(&name) {
-            return Err(Error::Config(format!("an account named {name} is already linked")));
+            return Err(Error::Config(format!(
+                "an account named {name} is already linked; link another with `--name <name>`"
+            )));
         }
         if provider == "icloud" && config.accounts.iter().any(|(n, c)| c.provider(n) == "icloud") {
             return Err(Error::Config(
@@ -135,7 +159,7 @@ pub fn add(name: Option<&str>, provider: &str, root: &Path) -> Result<(String, S
         provider: (name != provider).then(|| provider.to_string()),
         ..Default::default()
     };
-    let note = sign_in(&name, &cfg, root)?;
+    let note = sign_in(&name, &cfg, root, true)?;
     config::update(|config| {
         free(config)?;
         config.first_run_done = true;
@@ -152,7 +176,7 @@ pub fn login(name: &str, root: &Path) -> Result<String> {
         .accounts
         .get(name)
         .ok_or_else(|| Error::Config(format!("no account named {name}")))?;
-    sign_in(name, cfg, root)
+    sign_in(name, cfg, root, false)
 }
 
 /// Unlinks an account: forgets its cache and (Google) its sign-in on this
@@ -197,7 +221,7 @@ pub fn statuses(config: &Config, root: &Path) -> Vec<AccountStatus> {
                 "google" => {
                     let g = google(name, cfg, root);
                     if g.signed_in() {
-                        (true, "signed in".to_string())
+                        (true, g.known_address().unwrap_or_else(|| "signed in".to_string()))
                     } else {
                         (false, format!("signed out: run `cloud-contacts account login {name}`"))
                     }

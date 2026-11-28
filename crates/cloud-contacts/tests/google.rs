@@ -378,15 +378,55 @@ fn google_takes_over_another_cloud_apps_sign_in() {
             .is_file()
     );
 
-    // Two addresses that could be taken over: the browser asks which.
+    // Two addresses that could be taken over: one at a time, Cloudmail's first.
     sibling_sign_in(
         &env,
         "cloudmail/gws/gmail",
         json!({"token_valid": true, "user": "third@gmail.com", "scopes": [contacts]}),
     );
     let added = env.json(&["account", "add", "google"]);
-    assert_eq!(added["note"], "signed in to Google");
-    assert_eq!(logins().lines().count(), 4);
+    assert_eq!(
+        added["note"],
+        "signed in to Google as third@gmail.com, with Cloudmail's sign-in"
+    );
+    let (exit, e) = env.fails(&["account", "add", "google"]);
+    assert_eq!(exit, 1);
+    assert!(e["message"].as_str().unwrap().contains("--name"), "{e}");
+    let added = env.json(&["account", "add", "google", "--name", "sam"]);
+    assert_eq!(
+        added["note"],
+        "signed in to Google as sam@gmail.com, with Cloud Calendar's sign-in"
+    );
+    assert_eq!(logins().lines().count(), 3);
+    let address = |name: &str| {
+        std::fs::read_to_string(env.dir.path().join(format!("config/cloud-contacts/gws/{name}/address")))
+            .unwrap_or_default()
+    };
+    assert_eq!(
+        (address("google"), address("sam"), address("work")),
+        ("third@gmail.com".into(), "sam@gmail.com".into(), "me@gmail.com".into())
+    );
+
+    // Nothing is left to take over: the browser, and not to an address linked here already.
+    let out = env.run_with(
+        &["account", "add", "google", "--name", "again"],
+        &[("FAKE_GWS_USER", "Sam@gmail.com")],
+    );
+    assert_eq!(code(&out), 1);
+    assert!(
+        stderr(&out).contains("sam@gmail.com is already linked here as sam"),
+        "{}",
+        stderr(&out)
+    );
+    assert!(!env.dir.path().join("config/cloud-contacts/gws/again").exists());
+
+    // An account Google stopped taking is signed in again with its own address's sign-in, not the first there is.
+    let dead = env.dir.path().join("config/cloud-contacts/gws/sam/credentials.enc");
+    std::fs::write(&dead, r#"{"token_valid": false}"#).unwrap();
+    let before = logins().lines().count();
+    env.ok(&["account", "login", "sam"]);
+    assert_eq!(logins().lines().count(), before);
+    assert_eq!(std::fs::read_to_string(&dead).unwrap(), sam.to_string());
 }
 
 #[test]

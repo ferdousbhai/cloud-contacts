@@ -20,6 +20,11 @@
 //! ([`Google::adopt`]). It is a copy: each app's directory stays its own, and
 //! signing out of one app leaves the others signed in.
 //!
+//! Several Google accounts: each is an account of its own name, and its
+//! address is kept beside its sign-in ([`ADDRESS_FILE`]). A new account takes
+//! over the first sign-in of an address not linked here yet; one that is
+//! signed in again takes over only its own address.
+//!
 //! Contacts are read into the shape iCloud's cards have (see `model`), so
 //! the window, the command line and vCard export treat both accounts alike;
 //! Google's own record rides along in the card under [`ORIGINAL`]. A write
@@ -65,6 +70,8 @@ pub const SIGN_IN_SCOPES: &str = "https://www.googleapis.com/auth/gmail.modify,h
 const SIBLINGS: [(&str, &str); 2] = [("cloudmail", "Cloudmail"), ("cloud-calendar", "Cloud Calendar")];
 /// The key gws encrypts `credentials.enc` with, beside it.
 const KEY_FILE: &str = ".encryption_key";
+/// The address an account is signed in to, kept beside gws's files.
+const ADDRESS_FILE: &str = "address";
 pub const INSTALL_HINT: &str = "install Google's Workspace CLI: `npm install -g @googleworkspace/cli` (or a release binary from https://github.com/googleworkspace/cli/releases)";
 
 /// The key in a card that holds Google's own record of the contact.
@@ -209,31 +216,79 @@ impl Google {
         self.sign_in_at(&self.dir).is_some_and(|(_, scopes)| covers(&scopes))
     }
 
+    /// The address kept beside the sign-in in `dir`.
+    fn recorded(dir: &Path) -> Option<String> {
+        nonblank(std::fs::read_to_string(dir.join(ADDRESS_FILE)).ok()).map(|a| a.to_lowercase())
+    }
+
+    /// The address the sign-in in `dir` is of: the one kept there, else what
+    /// Google says.
+    fn address_at(&self, dir: &Path) -> Option<String> {
+        Self::recorded(dir).or_else(|| self.sign_in_at(dir).map(|(address, _)| address))
+    }
+
+    /// The Google address this account is signed in to, kept beside the
+    /// sign-in once known (never in a gws directory named in the config).
+    pub fn address(&self) -> Option<String> {
+        if !self.signed_in() {
+            return None;
+        }
+        let address = self.address_at(&self.dir)?;
+        if Self::recorded(&self.dir).is_none() && self.dir == gws_dir(&self.name) {
+            let _ = crate::config::write_private(&self.dir.join(ADDRESS_FILE), address.as_bytes());
+        }
+        Some(address)
+    }
+
+    /// The address kept for this account, without asking Google.
+    pub fn known_address(&self) -> Option<String> {
+        Self::recorded(&self.dir)
+    }
+
+    /// The other Google accounts linked here, by the address each is signed
+    /// in to.
+    pub fn others(&self) -> Vec<(String, String)> {
+        let mut dirs: Vec<PathBuf> = std::fs::read_dir(crate::config::config_dir().join("gws"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|dir| *dir != self.dir)
+            .collect();
+        dirs.sort();
+        dirs.iter()
+            .filter_map(|dir| {
+                let name = dir.file_name()?.to_string_lossy().into_owned();
+                self.address_at(dir).map(|address| (address, name))
+            })
+            .collect()
+    }
+
     /// Takes over the Google sign-in another Cloud app has on this computer,
-    /// in place of a browser sign-in: when the sign-ins there that work,
-    /// cover [`SCOPES`] and aren't of an address another account here is
-    /// signed in to are all of one address, gws's two files are copied from
-    /// the first into this account's directory. Returns that address and the
-    /// app's name. Only with the built-in client, which the three apps share,
-    /// and never into a gws directory named in the config (the person's own).
+    /// in place of a browser sign-in: gws's two files are copied into this
+    /// account's directory from the first sign-in there that works, covers
+    /// [`SCOPES`] and is of the right address. For an account that was signed
+    /// in, that is its own address; for a new one, any address no other
+    /// account here is signed in to. (A sign-in from before addresses were
+    /// kept is replaced only when one address could be meant.) Returns the
+    /// address and the app's name. Only with the built-in client, which the
+    /// three apps share, and never into a gws directory named in the config
+    /// (the person's own).
     pub fn adopt(&self) -> Option<(String, &'static str)> {
         if self.client.as_ref().map(|(id, _)| id.as_str()) != GOOGLE_CLIENT_ID || self.dir != gws_dir(&self.name) {
             return None;
         }
-        let accounts = |gws: PathBuf| {
-            let mut dirs: Vec<PathBuf> = std::fs::read_dir(gws)
+        let config = crate::config::config_dir();
+        let mut found: Vec<(String, PathBuf, &'static str)> = Vec::new();
+        for (folder, app) in SIBLINGS {
+            let mut dirs: Vec<PathBuf> = std::fs::read_dir(config.parent()?.join(folder).join("gws"))
                 .into_iter()
                 .flatten()
                 .flatten()
                 .map(|e| e.path())
                 .collect();
             dirs.sort();
-            dirs
-        };
-        let config = crate::config::config_dir();
-        let mut found: Vec<(String, PathBuf, &'static str)> = Vec::new();
-        for (folder, app) in SIBLINGS {
-            for dir in accounts(config.parent()?.join(folder).join("gws")) {
+            for dir in dirs {
                 if let Some((address, scopes)) = self.sign_in_at(&dir)
                     && covers(&scopes)
                 {
@@ -244,16 +299,17 @@ impl Google {
         if found.is_empty() {
             return None;
         }
-        let here: Vec<String> = accounts(config.join("gws"))
-            .iter()
-            .filter(|dir| **dir != self.dir)
-            .filter_map(|dir| self.sign_in_at(dir).map(|(address, _)| address))
-            .collect();
-        found.retain(|(address, ..)| !here.contains(address));
-        let (address, from, app) = found.first()?.clone();
-        if found.iter().any(|(other, ..)| *other != address) {
-            return None;
+        match Self::recorded(&self.dir) {
+            Some(own) => found.retain(|(address, ..)| *address == own),
+            None => {
+                let here = self.others();
+                found.retain(|(address, ..)| !here.iter().any(|(linked, _)| linked == address));
+                if self.signed_in() && found.iter().any(|(address, ..)| *address != found[0].0) {
+                    return None;
+                }
+            }
         }
+        let (address, from, app) = found.first()?.clone();
         crate::config::private_dir(&self.dir).ok()?;
         // The key first: a sign-in that can't be read is "not signed in", never another's.
         let _ = std::fs::remove_file(self.dir.join("credentials.enc"));
@@ -268,6 +324,7 @@ impl Google {
         }
         // Access tokens gws cached for the sign-in that was here are not this one's.
         let _ = std::fs::remove_file(self.dir.join("token_cache.json"));
+        let _ = crate::config::write_private(&self.dir.join(ADDRESS_FILE), address.as_bytes());
         Some((address, app))
     }
 
@@ -339,6 +396,10 @@ impl Google {
                 Kind::Auth,
                 format!("the Google sign-in didn't finish ({status}) {last}"),
             ));
+        }
+        // Maybe another Google account now.
+        if self.dir == gws_dir(&self.name) {
+            let _ = std::fs::remove_file(self.dir.join(ADDRESS_FILE));
         }
         Ok(())
     }
