@@ -274,7 +274,9 @@ impl Google {
     /// address and the app's name. Only with the built-in client, which the
     /// three apps share, and never into a gws directory named in the config
     /// (the person's own).
-    pub fn adopt(&self) -> Option<(String, &'static str)> {
+    ///
+    /// `want` names the address a new account is for.
+    pub fn adopt(&self, want: Option<&str>) -> Option<(String, &'static str)> {
         if self.client.as_ref().map(|(id, _)| id.as_str()) != GOOGLE_CLIENT_ID || self.dir != gws_dir(&self.name) {
             return None;
         }
@@ -304,6 +306,9 @@ impl Google {
             None => {
                 let here = self.others();
                 found.retain(|(address, ..)| !here.iter().any(|(linked, _)| linked == address));
+                if let Some(want) = want {
+                    found.retain(|(address, ..)| address == want);
+                }
                 if self.signed_in() && found.iter().any(|(address, ..)| *address != found[0].0) {
                     return None;
                 }

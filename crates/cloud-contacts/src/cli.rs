@@ -374,6 +374,10 @@ enum AccountAction {
         /// Its name, the prefix of its contacts' IDs [default: the provider].
         #[arg(long)]
         name: Option<String>,
+        /// Google: the address the account is for, when Cloudmail or Cloud
+        /// Calendar is signed in to several.
+        #[arg(long)]
+        address: Option<String>,
     },
     /// Sign in to a linked account again.
     Login { name: String },
@@ -1241,8 +1245,12 @@ impl Cli {
     fn account(&self, action: AccountAction) -> Outcome {
         match action {
             AccountAction::List => Ok(self.status()),
-            AccountAction::Add { provider, name } => {
-                let (name, note) = accounts::add(name.as_deref(), &provider, &self.root)?;
+            AccountAction::Add {
+                provider,
+                name,
+                address,
+            } => {
+                let (name, note) = accounts::add(name.as_deref(), &provider, address.as_deref(), &self.root)?;
                 let mut text = format!("Linked {name}: {note}");
                 // both kinds now: say how to mirror them
                 let config = config::load()?;

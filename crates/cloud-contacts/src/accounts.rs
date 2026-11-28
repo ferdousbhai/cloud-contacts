@@ -77,8 +77,8 @@ fn google(name: &str, cfg: &AccountConfig, root: &Path) -> Google {
 }
 
 /// `adding`: a new account, which must not be of a Google address another
-/// account here has.
-fn sign_in(name: &str, cfg: &AccountConfig, root: &Path, adding: bool) -> Result<String> {
+/// account here has. `want`: the Google address a new account is for.
+fn sign_in(name: &str, cfg: &AccountConfig, root: &Path, adding: bool, want: Option<&str>) -> Result<String> {
     match cfg.provider(name) {
         "icloud" => {
             icloud_sign_in()?;
@@ -93,8 +93,14 @@ fn sign_in(name: &str, cfg: &AccountConfig, root: &Path, adding: bool) -> Result
         // to another Google account.
         "google" => {
             let google = google(name, cfg, root);
+            let linked = |address: &str| google.others().into_iter().find(|(linked, _)| linked == address);
+            if let Some(want) = want
+                && let Some((_, other)) = linked(want)
+            {
+                return Err(Error::Other(format!("{want} is already linked here as {other}")));
+            }
             if !google.works()
-                && let Some((address, app)) = google.adopt()
+                && let Some((address, app)) = google.adopt(want)
             {
                 return Ok(format!("signed in to Google as {address}, with {app}'s sign-in"));
             }
@@ -102,10 +108,16 @@ fn sign_in(name: &str, cfg: &AccountConfig, root: &Path, adding: bool) -> Result
             let Some(address) = google.address() else {
                 return Ok("signed in to Google".into());
             };
-            if adding && let Some((_, other)) = google.others().into_iter().find(|(linked, _)| *linked == address) {
+            if adding && let Some((_, other)) = linked(&address) {
                 let _ = google.forget();
-                return Err(Error::Config(format!(
+                return Err(Error::Other(format!(
                     "{address} is already linked here as {other}: choose another Google account in the browser"
+                )));
+            }
+            if let Some(want) = want.filter(|want| *want != address) {
+                let _ = google.forget();
+                return Err(Error::Other(format!(
+                    "the browser signed in to {address}, not {want}: choose {want} there"
                 )));
             }
             Ok(format!("signed in to Google as {address}"))
@@ -126,8 +138,13 @@ pub fn next_name(provider: &str) -> Result<String> {
 }
 
 /// Links an account of `provider` ("icloud" or "google") and signs in to
-/// it; answers its name and what happened.
-pub fn add(name: Option<&str>, provider: &str, root: &Path) -> Result<(String, String)> {
+/// it; answers its name and what happened. `address`: the Google address the
+/// account is for, when it matters which.
+pub fn add(name: Option<&str>, provider: &str, address: Option<&str>, root: &Path) -> Result<(String, String)> {
+    if address.is_some() && provider != "google" {
+        return Err(Error::Config("--address is for google".into()));
+    }
+    let want = address.map(|a| a.trim().to_lowercase()).filter(|a| !a.is_empty());
     if !matches!(provider, "icloud" | "google") {
         return Err(Error::Config(format!(
             "unknown provider \"{provider}\" (known: icloud, google)"
@@ -159,7 +176,7 @@ pub fn add(name: Option<&str>, provider: &str, root: &Path) -> Result<(String, S
         provider: (name != provider).then(|| provider.to_string()),
         ..Default::default()
     };
-    let note = sign_in(&name, &cfg, root, true)?;
+    let note = sign_in(&name, &cfg, root, true, want.as_deref())?;
     config::update(|config| {
         free(config)?;
         config.first_run_done = true;
@@ -176,7 +193,7 @@ pub fn login(name: &str, root: &Path) -> Result<String> {
         .accounts
         .get(name)
         .ok_or_else(|| Error::Config(format!("no account named {name}")))?;
-    sign_in(name, cfg, root, false)
+    sign_in(name, cfg, root, false, None)
 }
 
 /// Unlinks an account: forgets its cache and (Google) its sign-in on this

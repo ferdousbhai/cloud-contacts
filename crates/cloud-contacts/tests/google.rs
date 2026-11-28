@@ -384,6 +384,45 @@ fn google_takes_over_another_cloud_apps_sign_in() {
         "cloudmail/gws/gmail",
         json!({"token_valid": true, "user": "third@gmail.com", "scopes": [contacts]}),
     );
+    // `--address` says which one a new account is for.
+    let added = env.json(&["account", "add", "google", "--address", "Sam@Gmail.com"]);
+    assert_eq!(
+        added["note"],
+        "signed in to Google as sam@gmail.com, with Cloud Calendar's sign-in"
+    );
+    let (exit, e) = env.fails(&[
+        "account",
+        "add",
+        "google",
+        "--name",
+        "twice",
+        "--address",
+        "sam@gmail.com",
+    ]);
+    assert_eq!(exit, 1);
+    assert!(
+        e["message"]
+            .as_str()
+            .unwrap()
+            .contains("sam@gmail.com is already linked here as google"),
+        "{e}"
+    );
+    let (exit, _) = env.fails(&["account", "add", "icloud", "--name", "x", "--address", "a@b.c"]);
+    assert_eq!(exit, 1);
+    env.ok(&["account", "remove", "google", "--yes"]);
+    // An address no other app has is signed in to in the browser, and must be the one it signs in to.
+    let out = env.run_with(
+        &["account", "add", "google", "--address", "new@example.com"],
+        &[("FAKE_GWS_USER", "else@example.com")],
+    );
+    assert_eq!(code(&out), 1);
+    assert!(
+        stderr(&out).contains("the browser signed in to else@example.com, not new@example.com"),
+        "{}",
+        stderr(&out)
+    );
+    assert!(!env.dir.path().join("config/cloud-contacts/gws/google").exists());
+
     let added = env.json(&["account", "add", "google"]);
     assert_eq!(
         added["note"],
@@ -397,7 +436,11 @@ fn google_takes_over_another_cloud_apps_sign_in() {
         added["note"],
         "signed in to Google as sam@gmail.com, with Cloud Calendar's sign-in"
     );
-    assert_eq!(logins().lines().count(), 3);
+    assert_eq!(
+        logins().lines().count(),
+        4,
+        "the one browser sign-in since is --address's"
+    );
     let address = |name: &str| {
         std::fs::read_to_string(env.dir.path().join(format!("config/cloud-contacts/gws/{name}/address")))
             .unwrap_or_default()

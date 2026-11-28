@@ -441,7 +441,7 @@ impl Window {
                 let root = root.ok_or_else(|| Error::Other(tr("no data directory ($HOME is not set)")))?;
                 // One more Google account each time: google, then google-2, …
                 let name = accounts::next_name(provider)?;
-                accounts::add(Some(&name), provider, &root)
+                accounts::add(Some(&name), provider, None, &root)
             },
             move |result| {
                 let Some(this) = weak.upgrade() else { return };
