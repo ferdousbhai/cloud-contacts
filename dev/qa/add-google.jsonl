@@ -1,0 +1,11 @@
+# "Add Google Account…" again links one more Google account, and not the same address twice. The stand-in gws signs
+# in at once as me@gmail.com, which the linked Google account is already: no browser opens, and nothing is linked.
+{"do":"wait","role":"list-item","name":"Bob Berg, iCloud","visible":true}
+{"do":"click","role":"button","name":"Accounts"}
+{"do":"wait","focus":{"role":"menu-item","name":"Google"}}
+{"do":"key","keys":"Down"}
+{"do":"key","keys":"Down"}
+{"do":"wait","focus":{"role":"menu-item","name":"Add Google Account…"}}
+{"do":"key","keys":"Return"}
+{"do":"wait","toasts":["me@gmail.com is already linked here as google: choose another Google account in the browser"]}
+{"do":"quit"}
