@@ -9,6 +9,8 @@ set -Eeuo pipefail
 # command with its answer; fails when a command fails or GLib logs a warning or a critical. bin/check runs every
 # script under dev/qa.
 #
+# A script line `@sibling <app>/gws/<account> <address>` stages a Google sign-in another Cloud app has (see `run`).
+#
 #   dev/qa.sh <app-binary> <script.jsonl>...
 #   CLOUD_CONTACTS_QA_SHOTS=<dir>  where a script's `shot` paths are written (default: a scratch directory, removed)
 #   OMUI_QA_TIMEOUT=120            seconds before one script's run is stopped
@@ -90,13 +92,22 @@ run() {
     CLOUD_CONTACTS_BROWSER=true CLOUD_CONTACTS_SYSTEMCTL=true)
   "${env[@]}" "$app" status >/dev/null
   "${env[@]}" "$app" account add google >/dev/null 2>&1
+  # A script line `@sibling <app>/gws/<account> <address>` is a Google sign-in another Cloud app has, as the fake gws
+  # keeps one, there once the accounts above are linked: what "Add Google Account…" can take over.
+  local where address
+  while read -r _ where address; do
+    mkdir -p "$root/config/$where"
+    : >"$root/config/$where/.encryption_key"
+    printf '{"token_valid": true, "user": "%s", "scopes": ["https://www.googleapis.com/auth/contacts"]}\n' \
+      "$address" >"$root/config/$where/credentials.enc"
+  done < <(grep '^@sibling ' "$script" || true)
 
   # In the background, waited for: bash runs a trap only once the foreground command ends, and `timeout` puts the app
   # in a process group Ctrl-C does not reach. Killing `timeout` stops the app with it.
   # A `language` command's catalog is named from the repository's root, as a script is; the app runs in the shots
   # directory, from which omui would read a relative path, so the app is given the whole path.
   local repo=${here%/dev}
-  sed -e "s|\"catalog\":\"dev/|\"catalog\":\"$repo/dev/|g" "$script" >"$root/script.jsonl"
+  sed -e '/^@sibling /d' -e "s|\"catalog\":\"dev/|\"catalog\":\"$repo/dev/|g" "$script" >"$root/script.jsonl"
   local status=0
   (
     cd "$shots"
@@ -112,7 +123,7 @@ run() {
 
   # Each command beside its answer; `quit`'s answer, or the failure that ended the run, comes last.
   echo "qa: $script"
-  grep -Ev '^[[:space:]]*(#|$)' "$script" | awk -v answers="$root/answers" '
+  grep -Ev '^[[:space:]]*(#|$|@sibling )' "$script" | awk -v answers="$root/answers" '
     { if ((getline answer < answers) > 0) { print "> " $0; print "< " answer } else { print "> " $0 " (not run)" } }
     END { while ((getline answer < answers) > 0) print "< " answer }'
   return "$status"

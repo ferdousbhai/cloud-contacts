@@ -17,7 +17,7 @@ use gtk::{gio, glib};
 use omui::icons::name;
 use omui::{background, i18n, tr, trn};
 
-use cloud_contacts::accounts;
+use cloud_contacts::accounts::{self, SignIn};
 use cloud_contacts::book::{Book, Entry, Shown};
 use cloud_contacts::config;
 use cloud_contacts::dedupe;
@@ -285,8 +285,8 @@ impl Window {
                 this.mirror_off();
             }
         });
-        action("add-icloud", |this| this.link("icloud"));
-        action("add-google", |this| this.link("google"));
+        action("add-icloud", |this| this.link("icloud", SignIn::Auto));
+        action("add-google", |this| this.add_google());
         let a = gio::SimpleAction::new("relogin", Some(glib::VariantTy::STRING));
         let weak = Rc::downgrade(self);
         a.connect_activate(move |_, name| {
@@ -427,29 +427,103 @@ impl Window {
             .flatten()
     }
 
-    /// Links an account of `provider`: icloud-session's window, or Google in
-    /// the browser. Blocks a worker thread until it is done.
-    fn link(self: &Rc<Self>, provider: &'static str) {
+    /// "Add Google Account…": with the sign-ins of several addresses to take over from the other Cloud apps, asks
+    /// which; with one or none, links as ever (that one's sign-in, or the browser). Looking asks Google about each
+    /// sign-in, so it is off the main thread.
+    fn add_google(self: &Rc<Self>) {
         let root = self.root.clone();
         let weak = Rc::downgrade(self);
-        self.toast(&match provider {
-            "google" => tr("Finish signing in to Google in your browser"),
-            _ => tr("Finish signing in to iCloud in its window"),
+        background(
+            move || {
+                let root = root.ok_or_else(|| Error::Other(tr("no data directory ($HOME is not set)")))?;
+                accounts::takeovers(&root)
+            },
+            move |result| {
+                let Some(this) = weak.upgrade() else { return };
+                match result {
+                    Ok(Ok(found)) if found.len() > 1 => this.choose_google(found),
+                    // What went wrong looking is what linking says.
+                    _ => this.link("google", SignIn::Auto),
+                }
+            },
+        );
+    }
+
+    /// Asks which of the addresses the other Cloud apps are signed in to the new account is for, or another
+    /// account, which signs in in the browser. Cancel, Escape and the close button link nothing.
+    fn choose_google(self: &Rc<Self>, found: Vec<(String, &'static str)>) {
+        let dialog = omui::Dialog::new(Some(""), None);
+        dialog.set_heading_translated("Which Google Account?");
+        // An address and the app whose sign-in it is are the same in every language; the last choice is not.
+        let choices = gtk::StringList::new(&[]);
+        for (address, app) in &found {
+            choices.append(&tr!("{} ({})", address, app));
+        }
+        choices.append(&tr("Another account…"));
+        let (row, choice) = omui::combo_row(&tr("Account"), "", &choices, 0);
+        let list = gtk::ListBox::builder()
+            .selection_mode(gtk::SelectionMode::None)
+            .css_classes(["boxed-list"])
+            .build();
+        list.append(&row.widget);
+        dialog.set_extra_child(Some(list.upcast_ref()));
+        dialog.add_response("cancel", "");
+        dialog.add_response("add", "");
+        dialog.set_response_translated("cancel", "_Cancel");
+        dialog.set_response_translated("add", "_Add Account");
+        dialog.set_response_appearance("add", omui::Appearance::Suggested);
+        dialog.set_default_response("add");
+        dialog.set_close_response("cancel");
+        let weak = Rc::downgrade(self);
+        dialog.connect_response(move |_, id| {
+            let Some(this) = weak.upgrade() else { return };
+            if id != "add" {
+                return;
+            }
+            let how = match found.get(choice.selected() as usize) {
+                Some((address, _)) => SignIn::Address(address.clone()),
+                None => SignIn::Browser,
+            };
+            this.link("google", how);
         });
+        dialog.present(&self.window);
+    }
+
+    /// Links an account of `provider`: icloud-session's window, or Google with another Cloud app's sign-in or in
+    /// the browser (`how`). Blocks a worker thread until it is done.
+    fn link(self: &Rc<Self>, provider: &'static str, how: SignIn) {
+        let root = self.root.clone();
+        let weak = Rc::downgrade(self);
+        // An address that was chosen has a sign-in to take over: nothing to finish anywhere.
+        if !matches!(how, SignIn::Address(_)) {
+            self.toast(&match provider {
+                "google" => tr("Finish signing in to Google in your browser"),
+                _ => tr("Finish signing in to iCloud in its window"),
+            });
+        }
         background(
             move || {
                 let root = root.ok_or_else(|| Error::Other(tr("no data directory ($HOME is not set)")))?;
                 // One more Google account each time: google, then google-2, …
                 let name = accounts::next_name(provider)?;
-                accounts::add(Some(&name), provider, None, &root)
+                accounts::add(Some(&name), provider, &how, &root)
             },
             move |result| {
                 let Some(this) = weak.upgrade() else { return };
                 match result {
                     Ok(Ok((name, _))) => {
                         this.toast(&tr!("Linked {}", account_title(&name, provider)));
+                        // Mirroring pairs one iCloud account with one Google account: it is offered when this is
+                        // the first of its kind beside one of the other, not for a second Google account.
                         let other = if provider == "google" { "icloud" } else { "google" };
-                        if this.accounts.borrow().iter().any(|(_, p)| p == other) {
+                        let (first, both) = {
+                            let linked = this.accounts.borrow();
+                            (
+                                !linked.iter().any(|(n, p)| p == provider && *n != name),
+                                linked.iter().any(|(_, p)| p == other),
+                            )
+                        };
+                        if first && both {
                             this.offer_after_link();
                         }
                         this.sync();

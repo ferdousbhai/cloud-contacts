@@ -76,9 +76,41 @@ fn google(name: &str, cfg: &AccountConfig, root: &Path) -> Google {
     Google::new(name, cfg, Store::new(root.join(name)))
 }
 
+/// How a Google account signs in.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub enum SignIn {
+    /// With the sign-in another Cloud app has on this computer when there is
+    /// one it can take over, else in the browser.
+    #[default]
+    Auto,
+    /// To this address: with another app's sign-in for it, else in the
+    /// browser, where it must be the address signed in to.
+    Address(String),
+    /// In the browser, taking no other app's sign-in over: for an account
+    /// none of them has.
+    Browser,
+}
+
+/// The addresses "Add Google Account…" could take over the sign-in of, with
+/// the app each would come from ([`Google::candidates`]), for the name the
+/// next Google account gets. More than one, and the window asks which.
+pub fn takeovers(root: &Path) -> Result<Vec<(String, &'static str)>> {
+    let name = next_name("google")?;
+    let cfg = AccountConfig {
+        provider: (name != "google").then(|| "google".to_string()),
+        ..Default::default()
+    };
+    Ok(google(&name, &cfg, root).candidates())
+}
+
 /// `adding`: a new account, which must not be of a Google address another
-/// account here has. `want`: the Google address a new account is for.
-fn sign_in(name: &str, cfg: &AccountConfig, root: &Path, adding: bool, want: Option<&str>) -> Result<String> {
+/// account here has. `how`: see [`SignIn`]; an account signed in again is
+/// `Auto`.
+fn sign_in(name: &str, cfg: &AccountConfig, root: &Path, adding: bool, how: &SignIn) -> Result<String> {
+    let want = match how {
+        SignIn::Address(address) => Some(address.as_str()),
+        _ => None,
+    };
     match cfg.provider(name) {
         "icloud" => {
             icloud_sign_in()?;
@@ -99,10 +131,11 @@ fn sign_in(name: &str, cfg: &AccountConfig, root: &Path, adding: bool, want: Opt
             {
                 return Err(Error::Other(format!("{want} is already linked here as {other}")));
             }
-            if !google.works()
+            if *how != SignIn::Browser
+                && !google.works()
                 && let Some((address, app)) = google.adopt(want)
             {
-                return Ok(format!("signed in to Google as {address}, with {app}'s sign-in"));
+                return Ok(format!("signed in to Google as {address}, with the sign-in from {app}"));
             }
             google.login()?;
             let Some(address) = google.address() else {
@@ -138,13 +171,20 @@ pub fn next_name(provider: &str) -> Result<String> {
 }
 
 /// Links an account of `provider` ("icloud" or "google") and signs in to
-/// it; answers its name and what happened. `address`: the Google address the
-/// account is for, when it matters which.
-pub fn add(name: Option<&str>, provider: &str, address: Option<&str>, root: &Path) -> Result<(String, String)> {
-    if address.is_some() && provider != "google" {
+/// it; answers its name and what happened. `how`: how a Google account
+/// signs in ([`SignIn`]); iCloud takes `Auto` alone.
+pub fn add(name: Option<&str>, provider: &str, how: &SignIn, root: &Path) -> Result<(String, String)> {
+    if *how != SignIn::Auto && provider != "google" {
         return Err(Error::Config("--address is for google".into()));
     }
-    let want = address.map(|a| a.trim().to_lowercase()).filter(|a| !a.is_empty());
+    // An address is told from another by its lowercase; an empty one is none.
+    let how = match how {
+        SignIn::Address(address) => match address.trim().to_lowercase() {
+            a if a.is_empty() => SignIn::Auto,
+            a => SignIn::Address(a),
+        },
+        other => other.clone(),
+    };
     if !matches!(provider, "icloud" | "google") {
         return Err(Error::Config(format!(
             "unknown provider \"{provider}\" (known: icloud, google)"
@@ -176,7 +216,7 @@ pub fn add(name: Option<&str>, provider: &str, address: Option<&str>, root: &Pat
         provider: (name != provider).then(|| provider.to_string()),
         ..Default::default()
     };
-    let note = sign_in(&name, &cfg, root, true, want.as_deref())?;
+    let note = sign_in(&name, &cfg, root, true, &how)?;
     config::update(|config| {
         free(config)?;
         config.first_run_done = true;
@@ -193,7 +233,7 @@ pub fn login(name: &str, root: &Path) -> Result<String> {
         .accounts
         .get(name)
         .ok_or_else(|| Error::Config(format!("no account named {name}")))?;
-    sign_in(name, cfg, root, false, None)
+    sign_in(name, cfg, root, false, &SignIn::Auto)
 }
 
 /// Unlinks an account: forgets its cache and (Google) its sign-in on this

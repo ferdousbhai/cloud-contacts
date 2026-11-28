@@ -353,7 +353,7 @@ fn google_takes_over_another_cloud_apps_sign_in() {
     let added = env.json(&["account", "add", "google"]);
     assert_eq!(
         added["note"],
-        "signed in to Google as sam@gmail.com, with Cloud Calendar's sign-in"
+        "signed in to Google as sam@gmail.com, with the sign-in from Cloud Calendar"
     );
     assert_eq!(logins().lines().count(), 1, "no browser sign-in");
     let own = env.dir.path().join("config/cloud-contacts/gws/google");
@@ -388,7 +388,7 @@ fn google_takes_over_another_cloud_apps_sign_in() {
     let added = env.json(&["account", "add", "google", "--address", "Sam@Gmail.com"]);
     assert_eq!(
         added["note"],
-        "signed in to Google as sam@gmail.com, with Cloud Calendar's sign-in"
+        "signed in to Google as sam@gmail.com, with the sign-in from Cloud Calendar"
     );
     let (exit, e) = env.fails(&[
         "account",
@@ -426,7 +426,7 @@ fn google_takes_over_another_cloud_apps_sign_in() {
     let added = env.json(&["account", "add", "google"]);
     assert_eq!(
         added["note"],
-        "signed in to Google as third@gmail.com, with Cloudmail's sign-in"
+        "signed in to Google as third@gmail.com, with the sign-in from Cloudmail"
     );
     let (exit, e) = env.fails(&["account", "add", "google"]);
     assert_eq!(exit, 1);
@@ -434,7 +434,7 @@ fn google_takes_over_another_cloud_apps_sign_in() {
     let added = env.json(&["account", "add", "google", "--name", "sam"]);
     assert_eq!(
         added["note"],
-        "signed in to Google as sam@gmail.com, with Cloud Calendar's sign-in"
+        "signed in to Google as sam@gmail.com, with the sign-in from Cloud Calendar"
     );
     assert_eq!(
         logins().lines().count(),

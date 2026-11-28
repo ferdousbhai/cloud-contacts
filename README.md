@@ -61,7 +61,9 @@ Several Google accounts work side by side, each under a name of its own:
 `cloud-contacts account add google --name work` (its IDs start with `work:`), or "Add Google
 Account…" in the window again, which names them `google`, `google-2`, … A new account takes over
 the sign-in of an address Cloudmail or Cloud Calendar has and Cloud Contacts doesn't yet, one
-address at a time; with none left, the browser opens for you to choose the account.
+address at a time; with none left, the browser opens for you to choose the account. When the
+other two apps are signed in to more than one address you haven't linked, the window asks which,
+or "Another account…" for the browser.
 `--address you@example.com` says which address a new account is for. The same
 address can't be linked twice, and `cloud-contacts status` shows which address each account is.
 Mirroring pairs iCloud with one Google account, so it waits while two are linked.

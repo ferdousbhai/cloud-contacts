@@ -1250,7 +1250,8 @@ impl Cli {
                 name,
                 address,
             } => {
-                let (name, note) = accounts::add(name.as_deref(), &provider, address.as_deref(), &self.root)?;
+                let how = address.map_or(accounts::SignIn::Auto, accounts::SignIn::Address);
+                let (name, note) = accounts::add(name.as_deref(), &provider, &how, &self.root)?;
                 let mut text = format!("Linked {name}: {note}");
                 // both kinds now: say how to mirror them
                 let config = config::load()?;

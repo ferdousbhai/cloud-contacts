@@ -264,26 +264,20 @@ impl Google {
             .collect()
     }
 
-    /// Takes over the Google sign-in another Cloud app has on this computer,
-    /// in place of a browser sign-in: gws's two files are copied into this
-    /// account's directory from the first sign-in there that works, covers
-    /// [`SCOPES`] and is of the right address. For an account that was signed
-    /// in, that is its own address; for a new one, any address no other
-    /// account here is signed in to. (A sign-in from before addresses were
-    /// kept is replaced only when one address could be meant.) Returns the
-    /// address and the app's name. Only with the built-in client, which the
-    /// three apps share, and never into a gws directory named in the config
-    /// (the person's own).
-    ///
-    /// `want` names the address a new account is for.
-    pub fn adopt(&self, want: Option<&str>) -> Option<(String, &'static str)> {
+    /// The Google sign-ins the other Cloud apps have on this computer that
+    /// work and cover [`SCOPES`]: the address, gws's directory and the app's
+    /// name, in the apps' order and each app's accounts by name. None with a
+    /// client other than the built-in one, which the three apps share, or
+    /// for a gws directory named in the config (the person's own).
+    fn takeable(&self) -> Vec<(String, PathBuf, &'static str)> {
+        let mut found = Vec::new();
         if self.client.as_ref().map(|(id, _)| id.as_str()) != GOOGLE_CLIENT_ID || self.dir != gws_dir(&self.name) {
-            return None;
+            return found;
         }
         let config = crate::config::config_dir();
-        let mut found: Vec<(String, PathBuf, &'static str)> = Vec::new();
+        let Some(base) = config.parent() else { return found };
         for (folder, app) in SIBLINGS {
-            let mut dirs: Vec<PathBuf> = std::fs::read_dir(config.parent()?.join(folder).join("gws"))
+            let mut dirs: Vec<PathBuf> = std::fs::read_dir(base.join(folder).join("gws"))
                 .into_iter()
                 .flatten()
                 .flatten()
@@ -298,6 +292,42 @@ impl Google {
                 }
             }
         }
+        found
+    }
+
+    /// The addresses a new account could take over the sign-in of
+    /// ([`Google::adopt`]): each once, with the app whose sign-in it would
+    /// be, in the order `adopt` takes them, and none that another account
+    /// here is signed in to. More than one is a choice for the person.
+    pub fn candidates(&self) -> Vec<(String, &'static str)> {
+        let found = self.takeable();
+        if found.is_empty() {
+            return Vec::new();
+        }
+        let here = self.others();
+        let mut out: Vec<(String, &'static str)> = Vec::new();
+        for (address, _, app) in found {
+            if !here.iter().any(|(linked, _)| *linked == address) && !out.iter().any(|(a, _)| *a == address) {
+                out.push((address, app));
+            }
+        }
+        out
+    }
+
+    /// Takes over the Google sign-in another Cloud app has on this computer,
+    /// in place of a browser sign-in: gws's two files are copied into this
+    /// account's directory from the first sign-in there that works, covers
+    /// [`SCOPES`] and is of the right address. For an account that was signed
+    /// in, that is its own address; for a new one, any address no other
+    /// account here is signed in to. (A sign-in from before addresses were
+    /// kept is replaced only when one address could be meant.) Returns the
+    /// address and the app's name. Only with the built-in client, which the
+    /// three apps share, and never into a gws directory named in the config
+    /// (the person's own).
+    ///
+    /// `want` names the address a new account is for.
+    pub fn adopt(&self, want: Option<&str>) -> Option<(String, &'static str)> {
+        let mut found = self.takeable();
         if found.is_empty() {
             return None;
         }

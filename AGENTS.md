@@ -29,7 +29,10 @@ One crate, `crates/cloud-contacts`:
   copy, never a shared directory. Several Google accounts are accounts of their own names
   (`--name`; the window uses `accounts::next_name`); each keeps its address in
   `gws/<name>/address`, a new one takes over an address not linked here yet, one signed in again
-  only its own, and `add` refuses an address another account has.
+  only its own, and `add` refuses an address another account has. With several addresses to take
+  over, the window's "Add Google Account…" asks which (`accounts::takeovers`, from
+  `Google::candidates`); `SignIn::Browser` is its "Another account…", which takes over nothing.
+  `tests/takeover.rs` holds the library to it, in a binary of its own since it sets the environment.
 - `src/model.rs` (the card and `Change`s), `src/draft.rs` (the edit dialog), `src/vcard.rs`,
   `src/store.rs` (one cache per account under `~/.local/share/cloud-contacts/<account>/`).
 - `src/config.rs` — `~/.config/cloud-contacts/config.toml` and the first run (Cloud Contacts
@@ -81,7 +84,7 @@ temporary HOME and XDG directories (set `XDG_CONFIG_HOME` too: `icloud_app::test
 does not), the fake iCloud server and the fake gws. Never launch the window on the owner's
 desktop: `dev/preview.sh <out-dir> [theme-dir ...]` takes pictures of it on those fakes in a nested
 Hyprland with a private HOME, XDG directories and D-Bus (its header lists the scenes).
-`dev/qa.sh <cloud-contacts-app> dev/qa/*.jsonl` drives the window, built with feature `qa`, through
+`dev/qa.sh <cloud-contacts-app> dev/qa/*.jsonl` (a script line `@sibling <app>/gws/<account> <address>` stages another Cloud app's Google sign-in) drives the window, built with feature `qa`, through
 the scripts' flows on the same fakes with omui's scripted QA (its protocol is in omui's README), on a
 private broadway display with no session bus; bin/check runs it. `.github/workflows/check.yml` runs bin/check on
 every push, in an Arch container as a regular user. README.md's picture is `dev/qa/screenshot.jsonl`'s shot (its

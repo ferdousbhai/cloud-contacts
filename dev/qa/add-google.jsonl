@@ -1,11 +1,51 @@
-# "Add Google Account…" again links one more Google account, and not the same address twice. The stand-in gws signs
-# in at once as me@gmail.com, which the linked Google account is already: no browser opens, and nothing is linked.
+# "Add Google Account…" again links one more Google account. With the other Cloud apps signed in to two addresses it
+# asks which, and takes that sign-in over; with one left it takes that one without asking; and the same address is
+# not linked twice. The stand-in gws signs in at once as me@gmail.com, which the linked Google account is already: no
+# browser opens.
+@sibling cloudmail/gws/gmail sam@example.com
+@sibling cloud-calendar/gws/google work@example.com
 {"do":"wait","role":"list-item","name":"Bob Berg, iCloud","visible":true}
+# Two addresses to take over: Cancel links nothing.
 {"do":"click","role":"button","name":"Accounts"}
 {"do":"wait","focus":{"role":"menu-item","name":"Google"}}
 {"do":"key","keys":"Down"}
 {"do":"key","keys":"Down"}
 {"do":"wait","focus":{"role":"menu-item","name":"Add Google Account…"}}
 {"do":"key","keys":"Return"}
+{"do":"wait","dialog":"Which Google Account?"}
+{"do":"wait","role":"combo-box","name":"Account","text":"sam@example.com (Cloudmail)"}
+{"do":"click","role":"button","name":"Cancel"}
+{"do":"wait","dialog":null}
+# "Another account…" is the browser, where the stand-in signs in to the address that is linked: refused.
+{"do":"click","role":"button","name":"Accounts"}
+{"do":"wait","focus":{"role":"menu-item","name":"Google"}}
+{"do":"key","keys":"Down"}
+{"do":"key","keys":"Down"}
+{"do":"key","keys":"Return"}
+{"do":"wait","dialog":"Which Google Account?"}
+{"do":"click","role":"combo-box","name":"Account"}
+{"do":"wait","focus":{"role":"list-item","name":"sam@example.com (Cloudmail)"}}
+{"do":"key","keys":"Down"}
+{"do":"key","keys":"Down"}
+{"do":"wait","focus":{"role":"list-item","name":"Another account…"}}
+{"do":"key","keys":"Return"}
+{"do":"wait","role":"combo-box","name":"Account","text":"Another account…"}
+{"do":"click","role":"button","name":"Add Account"}
+{"do":"wait","dialog":null}
 {"do":"wait","toasts":["me@gmail.com is already linked here as google: choose another Google account in the browser"]}
+# The second address, chosen: its sign-in is taken over as google-2.
+{"do":"click","role":"button","name":"Accounts"}
+{"do":"wait","focus":{"role":"menu-item","name":"Google"}}
+{"do":"key","keys":"Down"}
+{"do":"key","keys":"Down"}
+{"do":"key","keys":"Return"}
+{"do":"wait","dialog":"Which Google Account?"}
+{"do":"click","role":"combo-box","name":"Account"}
+{"do":"wait","focus":{"role":"list-item","name":"sam@example.com (Cloudmail)"}}
+{"do":"key","keys":"Down"}
+{"do":"wait","focus":{"role":"list-item","name":"work@example.com (Cloud Calendar)"}}
+{"do":"key","keys":"Return"}
+{"do":"click","role":"button","name":"Add Account"}
+{"do":"wait","dialog":null}
+{"do":"wait","toasts":["Linked Google (google-2)"]}
 {"do":"quit"}
